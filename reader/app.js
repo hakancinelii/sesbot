@@ -1,0 +1,422 @@
+const state = {
+  manifest: null,
+  page: 24,
+  paragraphIndex: 0,
+  fullPageMode: false,
+  playing: false,
+};
+
+const els = {
+  bookTitle: document.getElementById("book-title"),
+  pageLabel: document.getElementById("page-label"),
+  pageInput: document.getElementById("page-input"),
+  reader: document.getElementById("reader"),
+  nowPlaying: document.getElementById("now-playing"),
+  progressLabel: document.getElementById("progress-label"),
+  audio: document.getElementById("audio"),
+  seek: document.getElementById("seek"),
+  fullPageMode: document.getElementById("full-page-mode"),
+  prevPage: document.getElementById("prev-page"),
+  nextPage: document.getElementById("next-page"),
+  prevPara: document.getElementById("prev-para"),
+  nextPara: document.getElementById("next-para"),
+  playPause: document.getElementById("play-pause"),
+  stop: document.getElementById("stop"),
+  generatePage: document.getElementById("generate-page"),
+};
+
+async function init() {
+  let response = await fetch("/manifest.json");
+  if (!response.ok) {
+    response = await fetch("/api/manifest");
+  }
+  state.manifest = await response.json();
+
+  els.bookTitle.textContent = state.manifest.title.replace(/-/g, " ");
+  if (state.manifest.availablePages.length) {
+    state.page = state.manifest.availablePages[0];
+  }
+
+  bindEvents();
+  renderPage();
+}
+
+function bindEvents() {
+  els.prevPage.addEventListener("click", () => changePage(-1));
+  els.nextPage.addEventListener("click", () => changePage(1));
+  els.pageInput.addEventListener("change", () => {
+    const value = Number(els.pageInput.value);
+    if (value) {
+      state.page = value;
+      state.paragraphIndex = 0;
+      renderPage();
+    }
+  });
+
+  els.fullPageMode.addEventListener("change", () => {
+    state.fullPageMode = els.fullPageMode.checked;
+    stopPlayback();
+  });
+
+  els.playPause.addEventListener("click", togglePlayPause);
+  els.stop.addEventListener("click", stopPlayback);
+  els.prevPara.addEventListener("click", () => changeParagraph(-1, true));
+  els.nextPara.addEventListener("click", () => changeParagraph(1, true));
+  
+  if (els.generatePage) {
+    els.generatePage.addEventListener("click", () => generatePageAudio());
+  }
+
+  els.seek.addEventListener("input", () => {
+    if (!Number.isFinite(els.audio.duration)) return;
+    const target = (els.seek.value / 1000) * els.audio.duration;
+    els.audio.currentTime = target;
+  });
+
+  els.audio.addEventListener("timeupdate", updateSeek);
+  els.audio.addEventListener("ended", onAudioEnded);
+  els.audio.addEventListener("play", () => setPlaying(true));
+  els.audio.addEventListener("pause", () => setPlaying(false));
+
+  document.addEventListener("keydown", (event) => {
+    if (event.target.tagName === "INPUT") return;
+    if (event.code === "Space") {
+      event.preventDefault();
+      togglePlayPause();
+    }
+    if (event.code === "ArrowRight") changeParagraph(1, true);
+    if (event.code === "ArrowLeft") changeParagraph(-1, true);
+  });
+}
+
+function getPageItems(page) {
+  return state.manifest.pages[String(page)] || [];
+}
+
+function renderPage() {
+  const items = getPageItems(state.page);
+  els.pageInput.value = state.page;
+  els.pageLabel.textContent = `Sayfa ${state.page}`;
+
+  if (!items.length) {
+    els.reader.innerHTML = `<div class="page-sheet"><p class="paragraph missing">Bu sayfa icin metin bulunamadi.</p></div>`;
+    updateStatus("Metin yok");
+    return;
+  }
+
+  if (state.paragraphIndex >= items.length) {
+    state.paragraphIndex = 0;
+  }
+
+  const sheet = document.createElement("div");
+  sheet.className = "page-sheet";
+  
+  let hasMissing = false;
+
+  items.forEach((item, index) => {
+    const para = document.createElement("p");
+    para.className = "paragraph";
+    para.dataset.index = String(index);
+    para.textContent = item.text;
+
+    if (!item.available && !item.generatedAudio) {
+      hasMissing = true;
+      para.classList.add("missing");
+    } else {
+      para.classList.add("available");
+    }
+
+    para.addEventListener("click", () => {
+      state.paragraphIndex = index;
+      state.fullPageMode = false;
+      els.fullPageMode.checked = false;
+      highlightParagraph();
+      if (item.available || item.generatedAudio) {
+        playCurrent();
+      } else {
+        updateStatus("Bu paragraf icin ses yok");
+      }
+    });
+
+    if (index === state.paragraphIndex) {
+      para.classList.add("active");
+    }
+
+    sheet.appendChild(para);
+  });
+
+  els.reader.innerHTML = "";
+  els.reader.appendChild(sheet);
+  
+  if (els.generatePage) {
+    els.generatePage.style.display = hasMissing ? "inline-block" : "none";
+  }
+  
+  highlightParagraph(false);
+  updateStatus("Hazir");
+}
+
+function highlightParagraph(scroll = true) {
+  document.querySelectorAll(".paragraph").forEach((node) => {
+    node.classList.toggle("active", Number(node.dataset.index) === state.paragraphIndex);
+  });
+
+  const active = document.querySelector(".paragraph.active");
+  if (active && scroll) {
+    active.scrollIntoView({ behavior: "smooth", block: "center" });
+  }
+
+  const items = getPageItems(state.page);
+  const total = items.length;
+  els.progressLabel.textContent = total
+    ? `Paragraf ${state.paragraphIndex + 1}/${total}`
+    : "Paragraf —";
+}
+
+function getPageList() {
+  return state.manifest.availablePages.length
+    ? state.manifest.availablePages
+    : Object.keys(state.manifest.pages).map(Number).sort((a, b) => a - b);
+}
+
+function changePage(delta) {
+  const pages = getPageList();
+  const currentIndex = pages.indexOf(state.page);
+  const nextIndex = currentIndex + delta;
+  if (nextIndex < 0 || nextIndex >= pages.length) return;
+
+  state.page = pages[nextIndex];
+  state.paragraphIndex = 0;
+  stopPlayback();
+  renderPage();
+}
+
+function changeParagraph(delta, autoplay = false) {
+  const items = getPageItems(state.page);
+  const next = state.paragraphIndex + delta;
+  if (next < 0 || next >= items.length) return;
+
+  state.paragraphIndex = next;
+  highlightParagraph();
+  if (autoplay) {
+    playCurrent();
+  } else {
+    updateStatus("Hazir");
+  }
+}
+
+function togglePlayPause() {
+  if (state.playing) {
+    els.audio.pause();
+    return;
+  }
+  playCurrent();
+}
+
+function playCurrent() {
+  if (state.fullPageMode) {
+    const src = state.manifest.pageAudio[String(state.page)];
+    if (!src) {
+      updateStatus("Bu sayfa icin birlesik ses yok");
+      return;
+    }
+    loadAndPlay(src, `Sayfa ${state.page} (tam)`);
+    return;
+  }
+
+  const items = getPageItems(state.page);
+  const current = items[state.paragraphIndex];
+  if (!current?.available && !current?.generatedAudio) {
+    updateStatus("Bu paragraf icin ses yok");
+    return;
+  }
+
+  const audioSrc = current.generatedAudio || current.audio;
+  loadAndPlay(audioSrc, `Sayfa ${state.page}, paragraf ${state.paragraphIndex + 1}`);
+}
+
+function loadAndPlay(src, label) {
+  if (els.audio.getAttribute("src") !== src) {
+    els.audio.setAttribute("src", src);
+  }
+  updateStatus(label);
+  els.audio.play().catch(() => {
+    updateStatus("Oynatma baslatilamadi");
+    setPlaying(false);
+  });
+}
+
+function stopPlayback() {
+  els.audio.pause();
+  els.audio.currentTime = 0;
+  setPlaying(false);
+  updateStatus("Durduruldu");
+}
+
+function onAudioEnded() {
+  const pages = getPageList();
+  const currentIndex = pages.indexOf(state.page);
+
+  if (state.fullPageMode) {
+    if (currentIndex >= 0 && currentIndex < pages.length - 1) {
+      state.page = pages[currentIndex + 1];
+      state.paragraphIndex = 0;
+      renderPage();
+      playCurrent();
+      return;
+    }
+    setPlaying(false);
+    updateStatus("Kitap bitti");
+    return;
+  }
+
+  const items = getPageItems(state.page);
+  if (state.paragraphIndex < items.length - 1) {
+    state.paragraphIndex += 1;
+    highlightParagraph();
+    playCurrent();
+    return;
+  }
+
+  if (currentIndex >= 0 && currentIndex < pages.length - 1) {
+    state.page = pages[currentIndex + 1];
+    state.paragraphIndex = 0;
+    renderPage();
+    playCurrent();
+    return;
+  }
+
+  setPlaying(false);
+  updateStatus("Sayfa bitti");
+}
+
+function setPlaying(value) {
+  state.playing = value;
+  els.playPause.textContent = value ? "⏸" : "▶";
+}
+
+function updateStatus(text) {
+  els.nowPlaying.textContent = text;
+}
+
+function updateSeek() {
+  if (!Number.isFinite(els.audio.duration) || els.audio.duration <= 0) {
+    els.seek.value = 0;
+    return;
+  }
+  els.seek.value = Math.round((els.audio.currentTime / els.audio.duration) * 1000);
+}
+
+async function generateAudio(paraIndex, text, btnElement = null, autoPlay = true) {
+  if (btnElement) {
+    btnElement.innerHTML = "⏳ Uretiliyor...";
+    btnElement.disabled = true;
+  }
+  updateStatus("Dinamik ses uretiliyor (10-30 sn surebilir)...");
+
+  try {
+    const response = await fetch("/api/generate", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        text,
+        page: state.page,
+        paragraphIndex: paraIndex,
+      }),
+    });
+
+    if (!response.ok) {
+      const err = await response.text();
+      throw new Error(`Sunucu hatasi: ${response.status} ${err}`);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    
+    // Store url in state
+    const items = getPageItems(state.page);
+    if (items[paraIndex]) {
+      items[paraIndex].generatedAudio = url;
+    }
+
+    if (btnElement) {
+      btnElement.innerHTML = "✅ Dinle";
+      btnElement.disabled = false;
+      btnElement.onclick = (e) => {
+        e.stopPropagation();
+        state.paragraphIndex = paraIndex;
+        highlightParagraph();
+        loadAndPlay(url, "Dinamik Uretilen Ses");
+      };
+    }
+    
+    if (autoPlay) {
+      state.paragraphIndex = paraIndex;
+      highlightParagraph();
+      loadAndPlay(url, "Dinamik Uretilen Ses");
+    }
+    return true;
+  } catch (error) {
+    console.error("Ses uretme hatasi:", error);
+    updateStatus("Uretim hatasi: " + error.message);
+    if (btnElement) {
+      btnElement.innerHTML = "❌ Hata (Tekrar dene)";
+      btnElement.disabled = false;
+    }
+    return false;
+  }
+}
+
+async function generatePageAudio() {
+  if (els.generatePage) {
+    els.generatePage.disabled = true;
+    els.generatePage.innerHTML = "⏳ Sayfa Üretiliyor...";
+  }
+
+  state.fullPageMode = false;
+  els.fullPageMode.checked = false;
+
+  const items = getPageItems(state.page);
+  let firstMissingIndex = -1;
+
+  // Find all missing paragraphs and generate them sequentially
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (!item.available && !item.generatedAudio) {
+      if (firstMissingIndex === -1) firstMissingIndex = i;
+      const startPlaying = firstMissingIndex === i;
+      let success = false;
+      while (!success) {
+        if (startPlaying) {
+          state.paragraphIndex = i;
+          highlightParagraph();
+        }
+        success = await generateAudio(i, item.text, null, startPlaying);
+        if (!success) {
+          updateStatus("Hata alindi, tekrar deneniyor...");
+          await new Promise((resolve) => setTimeout(resolve, 1500));
+        }
+      }
+    }
+  }
+
+  if (els.generatePage) {
+    els.generatePage.disabled = false;
+    els.generatePage.innerHTML = "✅ Sayfa Üretildi";
+    els.generatePage.style.display = "none";
+  }
+
+  renderPage();
+
+  if (firstMissingIndex !== -1) {
+    state.paragraphIndex = firstMissingIndex;
+    highlightParagraph();
+    playCurrent();
+  }
+}
+
+init().catch((error) => {
+  els.reader.innerHTML = `<div class="page-sheet"><p class="paragraph missing">Arayuz yuklenemedi: ${error.message}</p></div>`;
+});

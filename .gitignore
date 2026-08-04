@@ -1,0 +1,7 @@
+public/
+.vercel
+__pycache__/
+*.pyc
+.env
+.env.local
+test_*.log

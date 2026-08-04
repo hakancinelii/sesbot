@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sesli Kitap Okuyucu</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div class="app">
+    <header class="toolbar">
+      <div class="toolbar-left">
+        <h1 id="book-title">Sesli Kitap</h1>
+        <span id="page-label" class="page-label">Sayfa —</span>
+      </div>
+      <div class="toolbar-center">
+        <button id="prev-page" class="btn" title="Onceki sayfa">←</button>
+        <input id="page-input" type="number" min="1" value="24" aria-label="Sayfa numarasi">
+        <button id="next-page" class="btn" title="Sonraki sayfa">→</button>
+      </div>
+      <div class="toolbar-right">
+        <button id="generate-page" class="btn btn-generate-page" style="display: none;" title="Sayfadaki eksik sesleri uret">📑 Sayfayı Seslendir</button>
+        <label class="mode-toggle">
+          <input id="full-page-mode" type="checkbox">
+          Tum sayfa sesi
+        </label>
+      </div>
+    </header>
+
+    <main id="reader" class="reader" aria-live="polite"></main>
+
+    <footer class="player">
+      <div class="player-info">
+        <span id="now-playing">Hazir</span>
+        <span id="progress-label" class="muted">Paragraf —</span>
+      </div>
+      <div class="player-controls">
+        <button id="prev-para" class="btn" title="Onceki paragraf">⏮</button>
+        <button id="play-pause" class="btn btn-primary" title="Oynat / Duraklat">▶</button>
+        <button id="stop" class="btn" title="Durdur">⏹</button>
+        <button id="next-para" class="btn" title="Sonraki paragraf">⏭</button>
+      </div>
+      <div class="player-progress">
+        <input id="seek" type="range" min="0" max="1000" value="0" step="1" aria-label="Ses konumu">
+      </div>
+    </footer>
+  </div>
+
+  <audio id="audio" preload="auto"></audio>
+  <script src="/app.js"></script>
+</body>
+</html>
