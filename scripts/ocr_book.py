@@ -42,6 +42,23 @@ def get_printed_page_number(page: fitz.Page):
     return None
 
 
+def ocr_page_number(text: str):
+    """OCR metninin alt kismindan sayfa numarasini bulur.
+
+    Sayfa numarasi genellikle son satirdir ancak 'F: 4' gibi artefaktlar
+    sona eklenebilir; bu yuzden son 5 satir geriye dogru taranir.
+    """
+    import re
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    for line in reversed(lines[-5:]):
+        if re.fullmatch(r"\d{1,4}", line):
+            number = int(line)
+            if 1 <= number <= 700:
+                return number
+    return None
+
+
 def ocr_image(image_path: Path) -> str:
     result = subprocess.run(
         ["swift", str(HELPER), str(image_path)],
@@ -80,7 +97,7 @@ def main() -> None:
     for pdf_index in range(start_page_arg, end):
         try:
             text = ocr_page(doc, pdf_index, DEFAULT_DPI)
-            book_page = get_printed_page_number(doc[pdf_index])
+            book_page = ocr_page_number(text) or get_printed_page_number(doc[pdf_index])
             existing[str(pdf_index)] = {"book_page": book_page, "text": text}
         except Exception as exc:
             print(f"[{pdf_index}/{page_count}] HATA: {exc}", flush=True)
