@@ -1,5 +1,13 @@
 {
   "buildCommand": "python3 scripts/build_vercel.py",
   "outputDirectory": "public",
-  "installCommand": "python3 -m pip install --break-system-packages -r requirements.txt"
+  "installCommand": "python3 -m pip install --break-system-packages -r requirements.txt",
+  "functions": {
+    "api/manifest.py": {
+      "maxDuration": 60
+    },
+    "api/generate.py": {
+      "maxDuration": 120
+    }
+  }
 }
