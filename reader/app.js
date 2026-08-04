@@ -25,6 +25,18 @@ const els = {
   generatePage: document.getElementById("generate-page"),
 };
 
+function loadLastPage() {
+  const saved = Number(localStorage.getItem("sesbot-last-page"));
+  if (Number.isFinite(saved) && saved > 0) {
+    return saved;
+  }
+  return null;
+}
+
+function saveLastPage() {
+  localStorage.setItem("sesbot-last-page", String(state.page));
+}
+
 async function init() {
   let response = await fetch("/api/manifest", { cache: "no-store" });
   if (!response.ok) {
@@ -33,7 +45,10 @@ async function init() {
   state.manifest = await response.json();
 
   els.bookTitle.textContent = state.manifest.title.replace(/-/g, " ");
-  if (state.manifest.availablePages.length) {
+  const lastPage = loadLastPage();
+  if (lastPage && state.manifest.pages[String(lastPage)]) {
+    state.page = lastPage;
+  } else if (state.manifest.availablePages.length) {
     state.page = state.manifest.availablePages[0];
   }
 
@@ -46,8 +61,9 @@ function bindEvents() {
   els.nextPage.addEventListener("click", () => changePage(1));
   els.pageInput.addEventListener("change", () => {
     const value = Number(els.pageInput.value);
-    if (value) {
+    if (value && state.manifest.pages[String(value)]) {
       state.page = value;
+      saveLastPage();
       state.paragraphIndex = 0;
       renderPage();
     }
@@ -174,9 +190,9 @@ function highlightParagraph(scroll = true) {
 }
 
 function getPageList() {
-  return state.manifest.availablePages.length
-    ? state.manifest.availablePages
-    : Object.keys(state.manifest.pages).map(Number).sort((a, b) => a - b);
+  return Object.keys(state.manifest.pages)
+    .map(Number)
+    .sort((a, b) => a - b);
 }
 
 function changePage(delta) {
@@ -186,6 +202,7 @@ function changePage(delta) {
   if (nextIndex < 0 || nextIndex >= pages.length) return;
 
   state.page = pages[nextIndex];
+  saveLastPage();
   state.paragraphIndex = 0;
   stopPlayback();
   renderPage();
@@ -260,6 +277,7 @@ function onAudioEnded() {
   if (state.fullPageMode) {
     if (currentIndex >= 0 && currentIndex < pages.length - 1) {
       state.page = pages[currentIndex + 1];
+      saveLastPage();
       state.paragraphIndex = 0;
       renderPage();
       playCurrent();
@@ -280,6 +298,7 @@ function onAudioEnded() {
 
   if (currentIndex >= 0 && currentIndex < pages.length - 1) {
     state.page = pages[currentIndex + 1];
+    saveLastPage();
     state.paragraphIndex = 0;
     renderPage();
     playCurrent();

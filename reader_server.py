@@ -17,6 +17,7 @@ ROOT = Path(__file__).parent
 READER_DIR = ROOT / "reader"
 OUTPUT_DIR = ROOT / "output"
 DEFAULT_PDF = ROOT / "Dan-Brown-Sirlarin-Sirri.pdf"
+MANIFEST_FILE = ROOT / "manifest-runtime.json"
 
 
 def build_manifest(pdf_path: Path, output_dir: Path) -> dict:
@@ -67,7 +68,7 @@ class ReaderHandler(BaseHTTPRequestHandler):
         parsed = urlparse(self.path)
         path = unquote(parsed.path)
 
-        if path == "/api/manifest":
+        if path in ("/api/manifest", "/manifest.json"):
             self._send_json(self.manifest)
             return
 
@@ -110,6 +111,7 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
         if path == "/api/generate":
             try:
+                self.output_dir.mkdir(parents=True, exist_ok=True)
                 content_length = int(self.headers.get('Content-Length', 0))
                 post_data = self.rfile.read(content_length)
                 data = json.loads(post_data.decode('utf-8'))
@@ -160,6 +162,7 @@ class ReaderHandler(BaseHTTPRequestHandler):
                             self.manifest.setdefault("availablePages", []).append(int(page_str))
                             self.manifest["availablePages"] = sorted(self.manifest["availablePages"])
 
+                self._persist_manifest()
                 self.send_response(200)
                 self.send_header("Content-Type", "audio/mpeg")
                 self.send_header("Content-Length", str(len(audio_bytes)))
@@ -180,8 +183,19 @@ class ReaderHandler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(data)))
+        self.send_header("Cache-Control", "no-store")
         self.end_headers()
         self.wfile.write(data)
+
+    def _persist_manifest(self) -> None:
+        try:
+            MANIFEST_FILE.write_text(
+                json.dumps(self.manifest, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+            print(f"[okuyucu] Runtime manifest kaydedildi: {MANIFEST_FILE}")
+        except Exception as exc:
+            print(f"[okuyucu] Runtime manifest kaydedilemedi: {exc}")
 
 
 def parse_args() -> argparse.Namespace:
