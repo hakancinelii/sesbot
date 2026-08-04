@@ -10,7 +10,32 @@ import os
 import time
 import requests
 
-from lib.supabase_storage import is_configured, upload_bytes
+
+def _supabase_config():
+    return {
+        "url": os.environ.get("SUPABASE_URL", "").rstrip("/"),
+        "key": os.environ.get("SUPABASE_SERVICE_KEY", "").strip(),
+        "bucket": os.environ.get("SUPABASE_BUCKET", "audio").strip(),
+    }
+
+
+def _supabase_configured():
+    cfg = _supabase_config()
+    return bool(cfg["url"] and cfg["key"] and cfg["bucket"])
+
+
+def _supabase_upload(key, data):
+    cfg = _supabase_config()
+    url = f"{cfg['url']}/storage/v1/object/{cfg['bucket']}/{key}"
+    headers = {
+        "Authorization": f"Bearer {cfg['key']}",
+        "Content-Type": "audio/mpeg",
+        "x-upsert": "true",
+    }
+    resp = requests.put(url, headers=headers, data=data, timeout=120)
+    if not resp.ok:
+        raise RuntimeError(f"Supabase yukleme hatasi: {resp.status_code} {resp.text}")
+    return f"{cfg['url']}/storage/v1/object/public/{cfg['bucket']}/{key}"
 
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
@@ -110,10 +135,10 @@ class handler(BaseHTTPRequestHandler):
             supabase_url = None
             page = data.get("page")
             paragraph_index = data.get("paragraphIndex")
-            if page is not None and isinstance(paragraph_index, int) and is_configured():
+            if page is not None and isinstance(paragraph_index, int) and _supabase_configured():
                 key = f"audio/pages/{str(page).replace('/', '_')}_{paragraph_index + 1}.mp3"
                 try:
-                    supabase_url = upload_bytes(key, audio_bytes)
+                    supabase_url = _supabase_upload(key, audio_bytes)
                     print(f"Supabase'e yuklendi: {key}")
                 except Exception as exc:
                     print(f"Supabase yukleme hatasi (atlandi): {exc}")

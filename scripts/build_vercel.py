@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "api"))
 
 from reader_server import build_manifest  # noqa: E402
-from lib.supabase_storage import is_configured, upload_file  # noqa: E402
+from lib.supabase_storage import is_configured, file_urls  # noqa: E402
 
 PUBLIC = ROOT / "public"
 READER = ROOT / "reader"
@@ -21,36 +21,26 @@ OUTPUT = ROOT / "output"
 PDF = ROOT / "Dan-Brown-Sirlarin-Sirri.pdf"
 
 
-def rewrite_manifest_with_supabase(manifest: dict, url_map: dict[str, str]) -> dict:
-    for items in manifest.get("pages", {}).values():
+def rewrite_manifest_with_urls(manifest: dict, url_map: dict[str, str]) -> dict:
+    for page_key, items in manifest.get("pages", {}).items():
         for item in items:
-            audio = item.get("audio")
-            if audio:
-                name = audio.rsplit("/", 1)[-1]
-                if name in url_map:
-                    item["audio"] = url_map[name]
-    page_audio = manifest.get("pageAudio", {})
-    for page_key, audio in list(page_audio.items()):
-        name = audio.rsplit("/", 1)[-1]
+            name = f"{page_key}_{item['index']}.mp3"
+            if name in url_map:
+                item["audio"] = url_map[name]
+                item["available"] = True
+    available_pages = sorted(
+        int(page)
+        for page, items in manifest.get("pages", {}).items()
+        if any(item.get("available") for item in items)
+    )
+    manifest["availablePages"] = available_pages
+    page_audio: dict[str, str] = {}
+    for page in available_pages:
+        name = f"{page}.mp3"
         if name in url_map:
-            page_audio[page_key] = url_map[name]
+            page_audio[str(page)] = url_map[name]
+    manifest["pageAudio"] = page_audio
     return manifest
-
-
-def upload_audio_to_supabase(audio_dir: Path) -> dict[str, str]:
-    url_map: dict[str, str] = {}
-    if not is_configured():
-        print("Supabase yapilandirilmadi, audio Supabase'e yuklenmeyecek.")
-        return url_map
-    for mp3 in sorted(audio_dir.glob("*.mp3")):
-        key = f"audio/pages/{mp3.name}"
-        try:
-            url = upload_file(key, str(mp3))
-            url_map[mp3.name] = url
-        except Exception as exc:
-            print(f"  Supabase yukleme hatasi ({mp3.name}): {exc}")
-    print(f"Supabase'e {len(url_map)} ses dosyasi yuklendi.")
-    return url_map
 
 
 def main() -> None:
@@ -68,9 +58,18 @@ def main() -> None:
         copied += 1
 
     manifest = build_manifest(PDF, OUTPUT)
-    url_map = upload_audio_to_supabase(audio_dir)
-    if url_map:
-        manifest = rewrite_manifest_with_supabase(manifest, url_map)
+
+    url_map: dict[str, str] = {}
+    if is_configured():
+        url_map = file_urls("audio/pages/")
+        if url_map:
+            manifest = rewrite_manifest_with_urls(manifest, url_map)
+            print(f"Supabase'ten {len(url_map)} ses dosyasi baglandi.")
+        else:
+            print("Supabase'te audio/pages/ altinda dosya bulunamadi, yerel yol kullanildi.")
+    else:
+        print("Supabase yapilandirilmadi, sesler yerel /audio/ yolundan sunulacak.")
+
     PUBLIC.mkdir(exist_ok=True)
     (PUBLIC / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),
@@ -82,7 +81,7 @@ def main() -> None:
             if source.exists():
                 shutil.copy2(source, PUBLIC / name)
 
-    print(f"Vercel build hazir: {copied} ses dosyasi, sayfalar {manifest['availablePages']}")
+    print(f"Vercel build hazir: {copied} yerel ses dosyasi, sayfalar {manifest['availablePages']}")
 
 
 if __name__ == "__main__":
