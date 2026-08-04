@@ -10,3 +10,5 @@ test_*.log
 .DS_Store
 .local/
 .vscode/
+
+ocr_text/*.log
