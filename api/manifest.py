@@ -1,4 +1,5 @@
 from http.server import BaseHTTPRequestHandler
+import copy
 import json
 import os
 import sys
@@ -74,7 +75,7 @@ def _get_pages():
 
 
 def _build_manifest():
-    pages = _get_pages()
+    pages = copy.deepcopy(_get_pages())
     url_map = _supabase_audio_urls()
 
     for page_key, items in pages.items():
