@@ -13,6 +13,7 @@ const state = {
   volumeRaf: null,
   transitionTimer: null,
   generationCancelled: false,
+  autoNarration: false,
 };
 
 const els = {
@@ -92,7 +93,11 @@ function bindEvents() {
   els.nextPara.addEventListener("click", () => changeParagraph(1, true));
   
   if (els.generatePage) {
-    els.generatePage.addEventListener("click", () => generatePageAudio());
+    els.generatePage.addEventListener("click", () => {
+      const items = getPageItems(state.page);
+      const hasAudio = items.some((it) => !it.heading && isPlayable(it));
+      startBookNarration(state.page, hasAudio);
+    });
   }
 
   els.seek.addEventListener("input", () => {
@@ -248,8 +253,8 @@ function renderPage() {
   if (els.generatePage) {
     els.generatePage.style.display = "inline-block";
     els.generatePage.innerHTML = pageHasAudio
-      ? "🔁 Sayfayı Yeniden Seslendir"
-      : "📑 Sayfayı Seslendir";
+      ? "🔁 Sayfayı Yeniden Seslendir (sonra devam)"
+      : "📚 Sayfayı Seslendir (sonra devam)";
   }
 
   highlightParagraph(false);
@@ -302,34 +307,13 @@ function getSequentialNextPage(fromPage) {
 }
 
 async function advanceToNextPage() {
-  const next = getSequentialNextPage(state.page);
-  if (next === null) {
-    setPlaying(false);
-    updateStatus("Kitap bitti");
-    return;
-  }
-
-  const items = getPageItems(next);
-  const hasAudio =
-    items.some(isPlayable) || Boolean(state.manifest.pageAudio?.[String(next)]);
-
-  if (hasAudio) {
+  const next = getNextAudioPage(state.page);
+  if (next !== null) {
     navigateToPage(next, 1, { autoplay: true });
     return;
   }
-
-  // Sonraki sayfanin sesi yok -> otomatik seslendir, sonra oynat
-  state.page = next;
-  saveLastPage();
-  const first = firstPlayableIndex(next);
-  state.paragraphIndex = first !== null ? first : 0;
-  stopPlayback();
-  renderPage();
-  updateStatus(`Sayfa ${next} otomatik seslendiriliyor...`);
-  await generatePageAudio();
-  if (!state.generationCancelled && !state.fullPageMode) {
-    playCurrent();
-  }
+  setPlaying(false);
+  updateStatus("Sonraki sayfanın sesi hazır değil. 'Sayfayı Seslendir' butonuyla üretin.");
 }
 
 function animatePageFlip(oldItems, newItems, delta, onDone) {
@@ -464,12 +448,12 @@ function playCurrent() {
 
 function willAutoAdvanceAfterCurrent() {
   if (state.fullPageMode) {
-    return getSequentialNextPage(state.page) !== null;
+    return getNextAudioPage(state.page) !== null;
   }
   if (nextPlayableIndex(state.page, state.paragraphIndex, 1) !== null) {
     return true;
   }
-  return getSequentialNextPage(state.page) !== null;
+  return getNextAudioPage(state.page) !== null;
 }
 
 function cancelVolumeRamp() {
@@ -581,12 +565,14 @@ function updateSeek() {
   els.seek.value = Math.round((els.audio.currentTime / els.audio.duration) * 1000);
 }
 
-async function generateAudio(paraIndex, text, btnElement = null, autoPlay = true) {
+async function generateAudio(page, paraIndex, text, btnElement = null, autoPlay = true) {
   if (btnElement) {
     btnElement.innerHTML = "⏳ Uretiliyor...";
     btnElement.disabled = true;
   }
-  updateStatus("Dinamik ses uretiliyor (10-30 sn surebilir)...");
+  if (page === state.page) {
+    updateStatus("Dinamik ses uretiliyor (10-30 sn surebilir)...");
+  }
 
   try {
     const response = await fetch("/api/generate", {
@@ -596,7 +582,7 @@ async function generateAudio(paraIndex, text, btnElement = null, autoPlay = true
       },
       body: JSON.stringify({
         text,
-        page: state.page,
+        page,
         paragraphIndex: paraIndex,
       }),
     });
@@ -612,7 +598,7 @@ async function generateAudio(paraIndex, text, btnElement = null, autoPlay = true
     const supabaseUrl = response.headers.get("X-Supabase-Audio-Url");
 
     // Store generated audio path and blob URL in state
-    const items = getPageItems(state.page);
+    const items = getPageItems(page);
     if (items[paraIndex]) {
       if (supabaseUrl) {
         items[paraIndex].audio = supabaseUrl;
@@ -652,23 +638,34 @@ async function generateAudio(paraIndex, text, btnElement = null, autoPlay = true
   }
 }
 
-async function generatePageAudio() {
-  if (els.generatePage) {
+async function generatePageAudio(page = state.page, force = false) {
+  const isCurrent = page === state.page;
+  const items = getPageItems(page);
+  const playableItems = items.filter((it) => !it.heading);
+  const fullyNarrated =
+    playableItems.length > 0 && playableItems.every((it) => isPlayable(it));
+
+  // Sayfa zaten tamamen sesliyse ve zorlamiyorsak atla
+  if (fullyNarrated && !force) {
+    if (isCurrent) {
+      updateStatus("Sayfa zaten sesli");
+    }
+    return true;
+  }
+
+  if (isCurrent && els.generatePage) {
     els.generatePage.disabled = true;
     els.generatePage.innerHTML = "⏳ Sayfa Üretiliyor...";
   }
-
   state.fullPageMode = false;
   els.fullPageMode.checked = false;
-
-  const items = getPageItems(state.page);
 
   // 1) Eski sesleri Supabase'ten sil
   try {
     const clearResp = await fetch("/api/clear-page", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ page: state.page }),
+      body: JSON.stringify({ page }),
     });
     if (!clearResp.ok) {
       console.error("Eski sesler silinemedi:", await clearResp.text());
@@ -687,49 +684,76 @@ async function generatePageAudio() {
     item.generatedAudio = null;
   });
   if (state.manifest.pageAudio) {
-    delete state.manifest.pageAudio[String(state.page)];
+    delete state.manifest.pageAudio[String(page)];
   }
-  renderPage();
+  if (isCurrent) renderPage();
 
   // 3) Tum paragraflari sifirdan uret (basliklar haric)
-  const playableItems = items.filter((it) => !it.heading);
-  state.generationCancelled = false;
   for (let i = 0; i < items.length; i++) {
     if (items[i].heading) continue;
     if (state.generationCancelled) break;
     let success = false;
     while (!success) {
       if (state.generationCancelled) break;
-      success = await generateAudio(i, items[i].text, null, false);
+      success = await generateAudio(page, i, items[i].text, null, false);
       if (!success) {
-        updateStatus(`Hata alindi (paragraf ${i + 1}/${playableItems.length}), tekrar deneniyor...`);
+        updateStatus(`Sayfa ${page} hata (paragraf ${i + 1}/${playableItems.length}), tekrar deneniyor...`);
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
     }
   }
 
-  if (els.generatePage) {
+  if (isCurrent && els.generatePage) {
     els.generatePage.disabled = false;
     els.generatePage.innerHTML = "✅ Sayfa Üretildi";
   }
+  if (isCurrent) renderPage();
 
-  renderPage();
+  // 4) Birlesik sayfa sesini olustur (Supabase'teki paragraflardan)
+  try {
+    const mergeResponse = await fetch("/api/merge-page", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page }),
+    });
+    if (mergeResponse.ok) {
+      const data = await mergeResponse.json();
+      if (data.pageAudio) {
+        state.manifest.pageAudio[String(page)] = data.pageAudio;
+      }
+      if (isCurrent) {
+        state.fullPageMode = true;
+        els.fullPageMode.checked = true;
+        playCurrent();
+      }
+    } else if (isCurrent) {
+      updateStatus("Sayfa seslendirildi");
+    }
+  } catch (error) {
+    console.error("Sayfa birlestirme hatasi:", error);
+    if (isCurrent) updateStatus("Sayfa seslendirildi");
+  }
+  return true;
+}
 
-  // 4) Birlesik sayfa sesini dene (yalnizca yerel sunucuda vardir)
-  const mergeResponse = await fetch("/api/merge-page", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ page: state.page }),
-  });
-
-  if (mergeResponse.ok) {
-    const data = await mergeResponse.json();
-    state.manifest.pageAudio[String(state.page)] = data.pageAudio;
-    state.fullPageMode = true;
-    els.fullPageMode.checked = true;
-    playCurrent();
-  } else {
-    updateStatus("Sayfa seslendirildi");
+async function startBookNarration(page = state.page, forceCurrent = false) {
+  if (state.autoNarration) return;
+  state.autoNarration = true;
+  state.generationCancelled = false;
+  let current = page;
+  let force = forceCurrent;
+  while (state.autoNarration && !state.generationCancelled) {
+    updateStatus(`Sayfa ${current} seslendiriliyor...`);
+    await generatePageAudio(current, force);
+    if (state.generationCancelled) break;
+    const next = getSequentialNextPage(current);
+    if (next === null) break;
+    current = next;
+    force = false;
+  }
+  state.autoNarration = false;
+  if (!state.generationCancelled) {
+    updateStatus("Kitap seslendirmesi tamamlandı");
   }
 }
 

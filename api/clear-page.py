@@ -62,8 +62,11 @@ class handler(BaseHTTPRequestHandler):
 
             deleted = []
             if _supabase_configured():
-                prefix = f"audio/pages/{page}"
-                names = [n for n in _list_files(prefix) if n.startswith(str(page))]
+                names = [
+                    n
+                    for n in _list_files("audio/pages/")
+                    if n.startswith(str(page))
+                ]
                 if names:
                     keys = [f"audio/pages/{n}" for n in names]
                     _delete_files(keys)
