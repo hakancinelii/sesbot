@@ -249,11 +249,95 @@ def extract_page_blocks(doc: fitz.Document, pdf_index: int) -> list[str]:
     return blocks
 
 
+OCR_TEXT_NAME = "ocr_pages.json"
+
+OCR_ARTIFACT_MAP = {
+    0x0219: "ş",  # s with comma (Vision Roman artifact)
+    0x0218: "Ş",
+    0x021B: "t",  # t with comma
+    0x021A: "T",
+    0x00A0: " ",  # non-breaking space
+    0x2019: "'",  # right single quote
+    0x2018: "'",
+    0x201C: '"',
+    0x201D: '"',
+}
+
+
+def clean_ocr_text(text: str) -> str:
+    out: list[str] = []
+    for char in text:
+        if char in "\n\r":
+            out.append(char)
+            continue
+        cp = ord(char)
+        if cp in OCR_ARTIFACT_MAP:
+            out.append(OCR_ARTIFACT_MAP[cp])
+            continue
+        category = unicodedata.category(char)
+        if category.startswith("C"):
+            continue
+        out.append(char)
+    return "".join(out)
+
+
+def find_ocr_text() -> Optional[Path]:
+    candidates = [
+        Path(__file__).resolve().parent / "ocr_text" / OCR_TEXT_NAME,
+        Path("/var/task") / "ocr_text" / OCR_TEXT_NAME,
+    ]
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def extract_paragraphs_from_ocr(
+    ocr_path: Path,
+    start_page: int = 1,
+    end_page: Optional[int] = None,
+) -> list[Paragraph]:
+    data = json.loads(ocr_path.read_text(encoding="utf-8"))
+
+    pages: dict[int, str] = {}
+    for pdf_index, entry in data.items():
+        book_page = entry.get("book_page")
+        text = entry.get("text", "")
+        if book_page is not None and text.strip():
+            pages[book_page] = text
+
+    last_page = end_page or max(pages)
+    merge_start = max(1, start_page - 1)
+
+    raw_paragraphs: list[Paragraph] = []
+    for book_page in sorted(pages):
+        if book_page < merge_start or book_page > last_page:
+            continue
+        page_text = clean_ocr_text(pages[book_page])
+        # alt bilgideki sayfa numarasini ayikla (satir sonundaki rakam)
+        page_text = re.sub(r"\s+\d{1,4}\s*$", "", page_text.rstrip())
+        for index, text in enumerate(split_paragraphs(page_text), start=1):
+            if not is_noise(text):
+                raw_paragraphs.append(
+                    Paragraph(book_page=book_page, index_on_page=index, text=text)
+                )
+
+    merged = merge_cross_page_paragraphs(raw_paragraphs)
+    return [p for p in merged if start_page <= p.book_page <= last_page]
+
+
 def extract_paragraphs(
     pdf_path: Path,
     start_page: int = 1,
     end_page: Optional[int] = None,
 ) -> list[Paragraph]:
+    ocr_path = find_ocr_text()
+    if ocr_path is not None:
+        try:
+            return extract_paragraphs_from_ocr(ocr_path, start_page, end_page)
+        except Exception as exc:
+            print(f"OCR metin kullanilamadi, PDF katmanina geciliyor: {exc}")
+
     doc = fitz.open(pdf_path)
     last_page = end_page or max(
         get_printed_page_number(doc[i]) or 0 for i in range(doc.page_count)
