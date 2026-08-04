@@ -12,3 +12,7 @@ test_*.log
 .vscode/
 
 ocr_text/*.log
+
+# Batch seslendirme ciktisi
+narrate_all.log
+narrate_progress.json
