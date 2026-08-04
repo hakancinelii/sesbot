@@ -105,6 +105,67 @@ h1 {
   padding: 32px 16px 48px;
 }
 
+.reader.book {
+  position: relative;
+  overflow: hidden;
+  padding: 0;
+  perspective: 2400px;
+}
+
+.sheet-layer {
+  position: absolute;
+  top: 32px;
+  right: 16px;
+  bottom: 48px;
+  left: 16px;
+  overflow: auto;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+}
+
+.sheet-layer.still {
+  z-index: 1;
+}
+
+.sheet-layer.flip {
+  z-index: 2;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.sheet-layer.flip .page-sheet {
+  transform-origin: left center;
+  backface-visibility: hidden;
+  box-shadow: 0 10px 30px var(--shadow);
+}
+
+@keyframes turnForward {
+  from {
+    transform: rotateY(0deg);
+  }
+  to {
+    transform: rotateY(-180deg);
+  }
+}
+
+@keyframes turnBackward {
+  from {
+    transform: rotateY(-180deg);
+  }
+  to {
+    transform: rotateY(0deg);
+  }
+}
+
+.sheet-layer.flip.turning-forward .page-sheet {
+  animation: turnForward 0.8s cubic-bezier(0.45, 0.05, 0.25, 1) forwards;
+}
+
+.sheet-layer.flip.turning-backward .page-sheet {
+  animation: turnBackward 0.8s cubic-bezier(0.45, 0.05, 0.25, 1) forwards;
+}
+
 .page-sheet {
   max-width: 720px;
   margin: 0 auto;

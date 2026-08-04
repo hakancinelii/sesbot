@@ -103,34 +103,39 @@ function bindEvents() {
       event.preventDefault();
       togglePlayPause();
     }
-    if (event.code === "ArrowRight") changeParagraph(1, true);
-    if (event.code === "ArrowLeft") changeParagraph(-1, true);
+    if (event.code === "ArrowRight") changePage(1);
+    if (event.code === "ArrowLeft") changePage(-1);
   });
+
+  let touchStartX = null;
+  els.reader.addEventListener(
+    "touchstart",
+    (event) => {
+      touchStartX = event.touches[0].clientX;
+    },
+    { passive: true }
+  );
+  els.reader.addEventListener(
+    "touchend",
+    (event) => {
+      if (touchStartX === null) return;
+      const dx = event.changedTouches[0].clientX - touchStartX;
+      if (Math.abs(dx) > 60) {
+        changePage(dx < 0 ? 1 : -1);
+      }
+      touchStartX = null;
+    },
+    { passive: true }
+  );
 }
 
 function getPageItems(page) {
   return state.manifest.pages[String(page)] || [];
 }
 
-function renderPage() {
-  const items = getPageItems(state.page);
-  els.pageInput.value = state.page;
-  els.pageLabel.textContent = `Sayfa ${state.page}`;
-
-  if (!items.length) {
-    els.reader.innerHTML = `<div class="page-sheet"><p class="paragraph missing">Bu sayfa icin metin bulunamadi.</p></div>`;
-    updateStatus("Metin yok");
-    return;
-  }
-
-  if (state.paragraphIndex >= items.length) {
-    state.paragraphIndex = 0;
-  }
-
+function buildSheet(items) {
   const sheet = document.createElement("div");
   sheet.className = "page-sheet";
-  
-  let hasMissing = false;
 
   items.forEach((item, index) => {
     const para = document.createElement("p");
@@ -139,7 +144,6 @@ function renderPage() {
     para.textContent = item.text;
 
     if (!item.available && !item.generatedAudio) {
-      hasMissing = true;
       para.classList.add("missing");
     } else {
       para.classList.add("available");
@@ -164,9 +168,27 @@ function renderPage() {
     sheet.appendChild(para);
   });
 
+  return sheet;
+}
+
+function renderPage() {
+  const items = getPageItems(state.page);
+  els.pageInput.value = state.page;
+  els.pageLabel.textContent = `Sayfa ${state.page}`;
+
+  if (!items.length) {
+    els.reader.innerHTML = `<div class="page-sheet"><p class="paragraph missing">Bu sayfa icin metin bulunamadi.</p></div>`;
+    updateStatus("Metin yok");
+    return;
+  }
+
+  if (state.paragraphIndex >= items.length) {
+    state.paragraphIndex = 0;
+  }
+
   els.reader.innerHTML = "";
-  els.reader.appendChild(sheet);
-  
+  els.reader.appendChild(buildSheet(items));
+
   const pageKey = String(state.page);
   const pageHasAudio =
     Boolean(state.manifest.pageAudio?.[pageKey]) ||
@@ -178,7 +200,7 @@ function renderPage() {
       ? "🔁 Sayfayı Yeniden Seslendir"
       : "📑 Sayfayı Seslendir";
   }
-  
+
   highlightParagraph(false);
   updateStatus("Hazir");
 }
@@ -206,17 +228,76 @@ function getPageList() {
     .sort((a, b) => a - b);
 }
 
+function getNextAudioPage(fromPage) {
+  const pages = getPageList();
+  const idx = pages.indexOf(fromPage);
+  for (let i = idx + 1; i < pages.length; i++) {
+    const items = getPageItems(pages[i]);
+    if (items.some((it) => it.available || it.generatedAudio)) {
+      return pages[i];
+    }
+  }
+  return null;
+}
+
+function animatePageFlip(oldItems, newItems, delta, onDone) {
+  const reader = els.reader;
+  const oldSheet = buildSheet(oldItems);
+  const newSheet = buildSheet(newItems);
+
+  reader.classList.add("book");
+  reader.innerHTML = "";
+
+  const still = document.createElement("div");
+  still.className = "sheet-layer still";
+  still.appendChild(newSheet);
+
+  const flip = document.createElement("div");
+  flip.className = "sheet-layer flip";
+  flip.appendChild(oldSheet);
+
+  reader.appendChild(still);
+  reader.appendChild(flip);
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() =>
+      flip.classList.add(delta > 0 ? "turning-forward" : "turning-backward")
+    );
+  });
+
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    reader.classList.remove("book");
+    renderPage();
+    if (onDone) onDone();
+  };
+  const inner = flip.querySelector(".page-sheet");
+  inner.addEventListener("animationend", finish);
+  setTimeout(finish, 1100);
+}
+
+function navigateToPage(targetPage, delta, { autoplay = false } = {}) {
+  if (targetPage === state.page) return;
+  const oldItems = getPageItems(state.page);
+
+  state.page = targetPage;
+  saveLastPage();
+  state.paragraphIndex = 0;
+  stopPlayback();
+
+  animatePageFlip(oldItems, getPageItems(targetPage), delta, () => {
+    if (autoplay) playCurrent();
+  });
+}
+
 function changePage(delta) {
   const pages = getPageList();
   const currentIndex = pages.indexOf(state.page);
   const nextIndex = currentIndex + delta;
   if (nextIndex < 0 || nextIndex >= pages.length) return;
-
-  state.page = pages[nextIndex];
-  saveLastPage();
-  state.paragraphIndex = 0;
-  stopPlayback();
-  renderPage();
+  navigateToPage(pages[nextIndex], delta);
 }
 
 function changeParagraph(delta, autoplay = false) {
@@ -288,8 +369,13 @@ function stopPlayback() {
 
 function onAudioEnded() {
   if (state.fullPageMode) {
+    const next = getNextAudioPage(state.page);
+    if (next !== null) {
+      navigateToPage(next, 1, { autoplay: true });
+      return;
+    }
     setPlaying(false);
-    updateStatus(`Sayfa ${state.page} tamamlandi`);
+    updateStatus(`Sayfa ${state.page} tamamlandi, kitap bitti`);
     return;
   }
 
@@ -301,8 +387,13 @@ function onAudioEnded() {
     return;
   }
 
-  setPlaying(false);
-  updateStatus(`Sayfa ${state.page} tamamlandi`);
+  const next = getNextAudioPage(state.page);
+  if (next !== null) {
+    navigateToPage(next, 1, { autoplay: true });
+  } else {
+    setPlaying(false);
+    updateStatus("Kitap bitti");
+  }
 }
 
 function setPlaying(value) {
