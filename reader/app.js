@@ -12,6 +12,7 @@ const state = {
   fadingOut: false,
   volumeRaf: null,
   transitionTimer: null,
+  generationCancelled: false,
 };
 
 const els = {
@@ -294,6 +295,43 @@ function getNextAudioPage(fromPage) {
   return null;
 }
 
+function getSequentialNextPage(fromPage) {
+  const pages = getPageList();
+  const idx = pages.indexOf(fromPage);
+  return idx + 1 < pages.length ? pages[idx + 1] : null;
+}
+
+async function advanceToNextPage() {
+  const next = getSequentialNextPage(state.page);
+  if (next === null) {
+    setPlaying(false);
+    updateStatus("Kitap bitti");
+    return;
+  }
+
+  const items = getPageItems(next);
+  const hasAudio =
+    items.some(isPlayable) || Boolean(state.manifest.pageAudio?.[String(next)]);
+
+  if (hasAudio) {
+    navigateToPage(next, 1, { autoplay: true });
+    return;
+  }
+
+  // Sonraki sayfanin sesi yok -> otomatik seslendir, sonra oynat
+  state.page = next;
+  saveLastPage();
+  const first = firstPlayableIndex(next);
+  state.paragraphIndex = first !== null ? first : 0;
+  stopPlayback();
+  renderPage();
+  updateStatus(`Sayfa ${next} otomatik seslendiriliyor...`);
+  await generatePageAudio();
+  if (!state.generationCancelled && !state.fullPageMode) {
+    playCurrent();
+  }
+}
+
 function animatePageFlip(oldItems, newItems, delta, onDone) {
   const reader = els.reader;
   const oldSheet = buildSheet(oldItems);
@@ -426,12 +464,12 @@ function playCurrent() {
 
 function willAutoAdvanceAfterCurrent() {
   if (state.fullPageMode) {
-    return getNextAudioPage(state.page) !== null;
+    return getSequentialNextPage(state.page) !== null;
   }
   if (nextPlayableIndex(state.page, state.paragraphIndex, 1) !== null) {
     return true;
   }
-  return getNextAudioPage(state.page) !== null;
+  return getSequentialNextPage(state.page) !== null;
 }
 
 function cancelVolumeRamp() {
@@ -492,6 +530,7 @@ function loadAndPlay(src, label) {
 
 function stopPlayback() {
   cancelVolumeRamp();
+  state.generationCancelled = true;
   if (state.transitionTimer) {
     clearTimeout(state.transitionTimer);
     state.transitionTimer = null;
@@ -505,13 +544,7 @@ function stopPlayback() {
 
 function onAudioEnded() {
   if (state.fullPageMode) {
-    const next = getNextAudioPage(state.page);
-    if (next !== null) {
-      navigateToPage(next, 1, { autoplay: true });
-      return;
-    }
-    setPlaying(false);
-    updateStatus(`Sayfa ${state.page} tamamlandi, kitap bitti`);
+    advanceToNextPage();
     return;
   }
 
@@ -528,13 +561,7 @@ function onAudioEnded() {
     return;
   }
 
-  const next = getNextAudioPage(state.page);
-  if (next !== null) {
-    navigateToPage(next, 1, { autoplay: true });
-  } else {
-    setPlaying(false);
-    updateStatus("Kitap bitti");
-  }
+  advanceToNextPage();
 }
 
 function setPlaying(value) {
@@ -664,13 +691,18 @@ async function generatePageAudio() {
   }
   renderPage();
 
-  // 3) Tum paragraflari sifirdan uret
+  // 3) Tum paragraflari sifirdan uret (basliklar haric)
+  const playableItems = items.filter((it) => !it.heading);
+  state.generationCancelled = false;
   for (let i = 0; i < items.length; i++) {
+    if (items[i].heading) continue;
+    if (state.generationCancelled) break;
     let success = false;
     while (!success) {
+      if (state.generationCancelled) break;
       success = await generateAudio(i, items[i].text, null, false);
       if (!success) {
-        updateStatus(`Hata alindi (paragraf ${i + 1}/${items.length}), tekrar deneniyor...`);
+        updateStatus(`Hata alindi (paragraf ${i + 1}/${playableItems.length}), tekrar deneniyor...`);
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
     }
