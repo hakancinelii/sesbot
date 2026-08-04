@@ -7,3 +7,6 @@ __pycache__/
 .env
 .env.local
 test_*.log
+.DS_Store
+.local/
+.vscode/

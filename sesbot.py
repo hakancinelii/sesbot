@@ -300,9 +300,94 @@ class VoxCPMClient:
         self.ultimate_cloning = ultimate_cloning
         self.control_instruction = control_instruction
         self.prompt_text = prompt_text
-        import requests
+        try:
+            import requests
 
-        self.session = requests.Session()
+            self.session = requests.Session()
+        except Exception:
+            # Minimal requests-like shim using urllib for environments
+            # where `requests` cannot be installed.
+            import urllib.request
+            import urllib.parse
+            import json as _json
+            import io as _io
+            import mimetypes as _mimetypes
+            import uuid as _uuid
+
+            class _SimpleResponse:
+                def __init__(self, resp):
+                    self._resp = resp
+
+                def raise_for_status(self):
+                    status = getattr(self._resp, 'status', None)
+                    if status is None:
+                        return
+                    if status >= 400:
+                        raise RuntimeError(f'HTTP {status}')
+
+                def json(self):
+                    data = self._resp.read()
+                    try:
+                        return _json.loads(data.decode('utf-8'))
+                    except Exception:
+                        return _json.loads(data)
+
+                def iter_lines(self, decode_unicode=True):
+                    # Stream line-by-line (SSE)
+                    while True:
+                        line = self._resp.readline()
+                        if not line:
+                            break
+                        if decode_unicode:
+                            yield line.decode('utf-8', errors='ignore')
+                        else:
+                            yield line
+
+                @property
+                def content(self):
+                    return self._resp.read()
+
+            class _SimpleSession:
+                def __init__(self):
+                    pass
+
+                def _build_multipart(self, files: dict):
+                    boundary = '----WebKitFormBoundary' + _uuid.uuid4().hex
+                    body = _io.BytesIO()
+                    for name, (filename, handle, content_type) in files.items():
+                        body.write((f'--{boundary}\r\n').encode('utf-8'))
+                        body.write((f'Content-Disposition: form-data; name="{name}"; filename="{filename}"\r\n').encode('utf-8'))
+                        body.write((f'Content-Type: {content_type or _mimetypes.guess_type(filename)[0] or "application/octet-stream"}\r\n\r\n').encode('utf-8'))
+                        body.write(handle.read())
+                        body.write(b"\r\n")
+                    body.write((f'--{boundary}--\r\n').encode('utf-8'))
+                    return boundary, body.getvalue()
+
+                def post(self, url, files=None, json=None, timeout=None):
+                    if files is not None:
+                        boundary, data = self._build_multipart(files)
+                        req = urllib.request.Request(url, data=data)
+                        req.add_header('Content-Type', f'multipart/form-data; boundary={boundary}')
+                        resp = urllib.request.urlopen(req, timeout=timeout)
+                        return _SimpleResponse(resp)
+                    if json is not None:
+                        data = _json.dumps(json).encode('utf-8')
+                        req = urllib.request.Request(url, data=data)
+                        req.add_header('Content-Type', 'application/json')
+                        resp = urllib.request.urlopen(req, timeout=timeout)
+                        return _SimpleResponse(resp)
+                    # fallback
+                    req = urllib.request.Request(url)
+                    resp = urllib.request.urlopen(req, timeout=timeout)
+                    return _SimpleResponse(resp)
+
+                def get(self, url, stream=False, timeout=None):
+                    req = urllib.request.Request(url)
+                    resp = urllib.request.urlopen(req, timeout=timeout)
+                    # resp is a file-like object; wrap to expose .readline and .read
+                    return _SimpleResponse(resp)
+
+            self.session = _SimpleSession()
         self._reference_file: Optional[dict] = None
 
     def upload_reference(self, reference_path: Path) -> dict:
