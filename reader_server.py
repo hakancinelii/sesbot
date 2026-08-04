@@ -11,13 +11,23 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
-from sesbot import extract_paragraphs, VoxCPMClient
+from sesbot import extract_paragraphs, VoxCPMClient, Paragraph, merge_page_audio
 
 ROOT = Path(__file__).parent
 READER_DIR = ROOT / "reader"
 OUTPUT_DIR = ROOT / "output"
 DEFAULT_PDF = ROOT / "Dan-Brown-Sirlarin-Sirri.pdf"
 MANIFEST_FILE = ROOT / "manifest-runtime.json"
+
+
+def load_runtime_manifest() -> dict | None:
+    if not MANIFEST_FILE.exists():
+        return None
+    try:
+        return json.loads(MANIFEST_FILE.read_text(encoding="utf-8"))
+    except Exception as exc:
+        print(f"[okuyucu] Runtime manifest yuklenemedi: {exc}")
+        return None
 
 
 def build_manifest(pdf_path: Path, output_dir: Path) -> dict:
@@ -60,6 +70,7 @@ def build_manifest(pdf_path: Path, output_dir: Path) -> dict:
 class ReaderHandler(BaseHTTPRequestHandler):
     manifest: dict = {}
     output_dir: Path = OUTPUT_DIR
+    pdf_path: Path = DEFAULT_PDF
 
     def log_message(self, format: str, *args) -> None:
         print(f"[okuyucu] {self.address_string()} - {format % args}")
@@ -176,6 +187,51 @@ class ReaderHandler(BaseHTTPRequestHandler):
                 self.send_error(500, str(e))
             return
 
+        if path == "/api/merge-page":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode("utf-8"))
+                page = data.get("page")
+                if not isinstance(page, int):
+                    self.send_error(400, "Sayfa numarasi gerekli")
+                    return
+
+                page_key = str(page)
+                paragraph_list = self.manifest.get("pages", {}).get(page_key)
+                if not paragraph_list:
+                    self.send_error(404, "Sayfa bulunamadi")
+                    return
+
+                missing_files = [
+                    self.output_dir / f"{page}_{p['index']}.mp3"
+                    for p in paragraph_list
+                    if not (self.output_dir / f"{page}_{p['index']}.mp3").exists()
+                ]
+                if missing_files:
+                    self.send_error(400, "Sayfa icin tum paragraf sesleri yok")
+                    return
+
+                paragraph_objects = [
+                    Paragraph(book_page=page, index_on_page=p["index"], text=p["text"])
+                    for p in paragraph_list
+                ]
+                merged_path = merge_page_audio(
+                    self.output_dir,
+                    page,
+                    paragraph_objects,
+                    pause_ms=1500,
+                    force=True,
+                )
+
+                merged_url = f"/audio/{merged_path.name}"
+                self.manifest.setdefault("pageAudio", {})[page_key] = merged_url
+                self._persist_manifest()
+                self._send_json({"pageAudio": merged_url})
+            except Exception as e:
+                self.send_error(500, str(e))
+            return
+
         self.send_error(404)
 
     def _send_json(self, payload: dict) -> None:
@@ -213,10 +269,14 @@ def main() -> None:
     if not args.pdf.exists():
         raise SystemExit(f"PDF bulunamadi: {args.pdf}")
 
-    ReaderHandler.manifest = build_manifest(args.pdf, args.output)
-    ReaderHandler.output_dir = args.output.resolve()
+    runtime_manifest = load_runtime_manifest()
+    if runtime_manifest is not None:
+        print(f"[okuyucu] Runtime manifest yuklendi: {MANIFEST_FILE}")
+        ReaderHandler.manifest = runtime_manifest
+    else:
+        ReaderHandler.manifest = build_manifest(args.pdf, args.output)
 
-    server = ThreadingHTTPServer((args.host, args.port), ReaderHandler)
+    ReaderHandler.output_dir = args.output.resolve()
     url = f"http://{args.host}:{args.port}"
     print(f"Okuyucu acildi: {url}")
     print(f"Hazir sayfalar: {ReaderHandler.manifest['availablePages']}")

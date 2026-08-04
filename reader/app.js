@@ -164,8 +164,13 @@ function renderPage() {
   els.reader.innerHTML = "";
   els.reader.appendChild(sheet);
   
+  const pageKey = String(state.page);
+  const pageHasAudio = Boolean(state.manifest.pageAudio?.[pageKey]);
+  const shouldShowGenerate = hasMissing || !pageHasAudio;
+
   if (els.generatePage) {
-    els.generatePage.style.display = hasMissing ? "inline-block" : "none";
+    els.generatePage.style.display = shouldShowGenerate ? "inline-block" : "none";
+    els.generatePage.innerHTML = pageHasAudio ? "🔊 Tam Sayfa Sesini Oynat" : "📑 Sayfayı Seslendir";
   }
   
   highlightParagraph(false);
@@ -249,6 +254,11 @@ function playCurrent() {
   }
 
   const audioSrc = current.generatedAudio || current.audio;
+  if (!audioSrc) {
+    updateStatus("Bu paragraf icin ses yok");
+    return;
+  }
+
   loadAndPlay(audioSrc, `Sayfa ${state.page}, paragraf ${state.paragraphIndex + 1}`);
 }
 
@@ -271,20 +281,9 @@ function stopPlayback() {
 }
 
 function onAudioEnded() {
-  const pages = getPageList();
-  const currentIndex = pages.indexOf(state.page);
-
   if (state.fullPageMode) {
-    if (currentIndex >= 0 && currentIndex < pages.length - 1) {
-      state.page = pages[currentIndex + 1];
-      saveLastPage();
-      state.paragraphIndex = 0;
-      renderPage();
-      playCurrent();
-      return;
-    }
     setPlaying(false);
-    updateStatus("Kitap bitti");
+    updateStatus(`Sayfa ${state.page} tamamlandi`);
     return;
   }
 
@@ -296,17 +295,8 @@ function onAudioEnded() {
     return;
   }
 
-  if (currentIndex >= 0 && currentIndex < pages.length - 1) {
-    state.page = pages[currentIndex + 1];
-    saveLastPage();
-    state.paragraphIndex = 0;
-    renderPage();
-    playCurrent();
-    return;
-  }
-
   setPlaying(false);
-  updateStatus("Sayfa bitti");
+  updateStatus(`Sayfa ${state.page} tamamlandi`);
 }
 
 function setPlaying(value) {
@@ -403,25 +393,36 @@ async function generatePageAudio() {
   els.fullPageMode.checked = false;
 
   const items = getPageItems(state.page);
-  let firstMissingIndex = -1;
+  const pageKey = String(state.page);
+  const existingPageAudio = state.manifest.pageAudio?.[pageKey];
 
-  // Find all missing paragraphs and generate them sequentially
+  if (existingPageAudio) {
+    state.fullPageMode = true;
+    els.fullPageMode.checked = true;
+    renderPage();
+    playCurrent();
+    if (els.generatePage) {
+      els.generatePage.disabled = false;
+      els.generatePage.innerHTML = "🔊 Tam Sayfa Sesini Oynat";
+    }
+    return;
+  }
+
+  let missingParagraphs = [];
   for (let i = 0; i < items.length; i++) {
     const item = items[i];
     if (!item.available && !item.generatedAudio) {
-      if (firstMissingIndex === -1) firstMissingIndex = i;
-      const startPlaying = firstMissingIndex === i;
-      let success = false;
-      while (!success) {
-        if (startPlaying) {
-          state.paragraphIndex = i;
-          highlightParagraph();
-        }
-        success = await generateAudio(i, item.text, null, startPlaying);
-        if (!success) {
-          updateStatus("Hata alindi, tekrar deneniyor...");
-          await new Promise((resolve) => setTimeout(resolve, 1500));
-        }
+      missingParagraphs.push({ index: i, text: item.text });
+    }
+  }
+
+  for (const paragraph of missingParagraphs) {
+    let success = false;
+    while (!success) {
+      success = await generateAudio(paragraph.index, paragraph.text, null, false);
+      if (!success) {
+        updateStatus("Hata alindi, tekrar deneniyor...");
+        await new Promise((resolve) => setTimeout(resolve, 1500));
       }
     }
   }
@@ -434,10 +435,22 @@ async function generatePageAudio() {
 
   renderPage();
 
-  if (firstMissingIndex !== -1) {
-    state.paragraphIndex = firstMissingIndex;
-    highlightParagraph();
+  const mergeResponse = await fetch("/api/merge-page", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ page: state.page }),
+  });
+
+  if (mergeResponse.ok) {
+    const data = await mergeResponse.json();
+    state.manifest.pageAudio[String(state.page)] = data.pageAudio;
+    state.fullPageMode = true;
+    els.fullPageMode.checked = true;
     playCurrent();
+  } else {
+    const errorText = await mergeResponse.text();
+    console.error("Sayfa birlestirme hatasi:", errorText);
+    updateStatus("Sayfa ses birlestirilemedi");
   }
 }
 
