@@ -1,9 +1,15 @@
+const FADE_IN_MS = 250;
+const FADE_OUT_MS = 250;
+
 const state = {
   manifest: null,
   page: 24,
   paragraphIndex: 0,
   fullPageMode: false,
   playing: false,
+  fadeOutAtEnd: false,
+  fadingOut: false,
+  volumeRaf: null,
 };
 
 const els = {
@@ -88,14 +94,26 @@ function bindEvents() {
 
   els.seek.addEventListener("input", () => {
     if (!Number.isFinite(els.audio.duration)) return;
+    cancelVolumeRamp();
+    els.audio.volume = 1;
+    state.fadingOut = false;
     const target = (els.seek.value / 1000) * els.audio.duration;
     els.audio.currentTime = target;
   });
 
-  els.audio.addEventListener("timeupdate", updateSeek);
+  els.audio.addEventListener("timeupdate", () => {
+    updateSeek();
+    handleFadeOut();
+  });
   els.audio.addEventListener("ended", onAudioEnded);
-  els.audio.addEventListener("play", () => setPlaying(true));
-  els.audio.addEventListener("pause", () => setPlaying(false));
+  els.audio.addEventListener("play", () => {
+    setPlaying(true);
+    rampVolume(1, FADE_IN_MS);
+  });
+  els.audio.addEventListener("pause", () => {
+    setPlaying(false);
+    cancelVolumeRamp();
+  });
 
   document.addEventListener("keydown", (event) => {
     if (event.target.tagName === "INPUT") return;
@@ -363,6 +381,7 @@ function playCurrent() {
       updateStatus("Bu sayfa icin birlesik ses yok");
       return;
     }
+    state.fadeOutAtEnd = willAutoAdvanceAfterCurrent();
     loadAndPlay(src, `Sayfa ${state.page} (tam)`);
     return;
   }
@@ -392,21 +411,79 @@ function playCurrent() {
     return;
   }
 
+  state.fadeOutAtEnd = willAutoAdvanceAfterCurrent();
   loadAndPlay(audioSrc, `Sayfa ${state.page}, paragraf ${idx + 1}`);
+}
+
+function willAutoAdvanceAfterCurrent() {
+  if (state.fullPageMode) {
+    return getNextAudioPage(state.page) !== null;
+  }
+  if (nextPlayableIndex(state.page, state.paragraphIndex, 1) !== null) {
+    return true;
+  }
+  return getNextAudioPage(state.page) !== null;
+}
+
+function cancelVolumeRamp() {
+  if (state.volumeRaf) {
+    cancelAnimationFrame(state.volumeRaf);
+    state.volumeRaf = null;
+  }
+  state.fadingOut = false;
+}
+
+function easeStep(t) {
+  return t * t * (3 - 2 * t);
+}
+
+function rampVolume(target, ms) {
+  cancelVolumeRamp();
+  const start = els.audio.volume;
+  if (ms <= 0) {
+    els.audio.volume = target;
+    return;
+  }
+  const startTime = performance.now();
+  const step = (now) => {
+    const t = Math.min(1, (now - startTime) / ms);
+    els.audio.volume = start + (target - start) * easeStep(t);
+    if (t < 1) {
+      state.volumeRaf = requestAnimationFrame(step);
+    } else {
+      state.volumeRaf = null;
+    }
+  };
+  state.volumeRaf = requestAnimationFrame(step);
+}
+
+function handleFadeOut() {
+  if (!state.fadeOutAtEnd || state.fadingOut) return;
+  if (els.audio.paused) return;
+  if (!Number.isFinite(els.audio.duration) || els.audio.duration <= 0) return;
+  const remainingMs = (els.audio.duration - els.audio.currentTime) * 1000;
+  if (remainingMs <= FADE_OUT_MS) {
+    state.fadingOut = true;
+    rampVolume(0, Math.max(120, remainingMs));
+  }
 }
 
 function loadAndPlay(src, label) {
   if (els.audio.getAttribute("src") !== src) {
     els.audio.setAttribute("src", src);
+    els.audio.volume = 0;
   }
   updateStatus(label);
   els.audio.play().catch(() => {
+    els.audio.volume = 1;
     updateStatus("Oynatma baslatilamadi");
     setPlaying(false);
   });
 }
 
 function stopPlayback() {
+  cancelVolumeRamp();
+  els.audio.volume = 1;
   els.audio.pause();
   els.audio.currentTime = 0;
   setPlaying(false);
