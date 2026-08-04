@@ -1,5 +1,6 @@
 const FADE_IN_MS = 250;
 const FADE_OUT_MS = 250;
+const PARAGRAPH_PAUSE_MS = 600;
 
 const state = {
   manifest: null,
@@ -10,6 +11,7 @@ const state = {
   fadeOutAtEnd: false,
   fadingOut: false,
   volumeRaf: null,
+  transitionTimer: null,
 };
 
 const els = {
@@ -368,6 +370,13 @@ function changeParagraph(delta, autoplay = false) {
 
 function togglePlayPause() {
   if (state.playing) {
+    if (state.transitionTimer) {
+      clearTimeout(state.transitionTimer);
+      state.transitionTimer = null;
+      setPlaying(false);
+      updateStatus("Durduruldu");
+      return;
+    }
     els.audio.pause();
     return;
   }
@@ -483,6 +492,10 @@ function loadAndPlay(src, label) {
 
 function stopPlayback() {
   cancelVolumeRamp();
+  if (state.transitionTimer) {
+    clearTimeout(state.transitionTimer);
+    state.transitionTimer = null;
+  }
   els.audio.volume = 1;
   els.audio.pause();
   els.audio.currentTime = 0;
@@ -506,7 +519,12 @@ function onAudioEnded() {
   if (nextPara !== null) {
     state.paragraphIndex = nextPara;
     highlightParagraph();
-    playCurrent();
+    setPlaying(true);
+    updateStatus("Paragraf geçişi...");
+    state.transitionTimer = setTimeout(() => {
+      state.transitionTimer = null;
+      playCurrent();
+    }, PARAGRAPH_PAUSE_MS);
     return;
   }
 
