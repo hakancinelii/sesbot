@@ -168,12 +168,15 @@ function renderPage() {
   els.reader.appendChild(sheet);
   
   const pageKey = String(state.page);
-  const pageHasAudio = Boolean(state.manifest.pageAudio?.[pageKey]);
-  const shouldShowGenerate = hasMissing || !pageHasAudio;
+  const pageHasAudio =
+    Boolean(state.manifest.pageAudio?.[pageKey]) ||
+    items.some((it) => it.available || it.generatedAudio);
 
   if (els.generatePage) {
-    els.generatePage.style.display = shouldShowGenerate ? "inline-block" : "none";
-    els.generatePage.innerHTML = pageHasAudio ? "🔊 Tam Sayfa Sesini Oynat" : "📑 Sayfayı Seslendir";
+    els.generatePage.style.display = "inline-block";
+    els.generatePage.innerHTML = pageHasAudio
+      ? "🔁 Sayfayı Yeniden Seslendir"
+      : "📑 Sayfayı Seslendir";
   }
   
   highlightParagraph(false);
@@ -400,35 +403,42 @@ async function generatePageAudio() {
   els.fullPageMode.checked = false;
 
   const items = getPageItems(state.page);
-  const pageKey = String(state.page);
-  const existingPageAudio = state.manifest.pageAudio?.[pageKey];
 
-  if (existingPageAudio) {
-    state.fullPageMode = true;
-    els.fullPageMode.checked = true;
-    renderPage();
-    playCurrent();
-    if (els.generatePage) {
-      els.generatePage.disabled = false;
-      els.generatePage.innerHTML = "🔊 Tam Sayfa Sesini Oynat";
+  // 1) Eski sesleri Supabase'ten sil
+  try {
+    const clearResp = await fetch("/api/clear-page", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ page: state.page }),
+    });
+    if (!clearResp.ok) {
+      console.error("Eski sesler silinemedi:", await clearResp.text());
     }
-    return;
+  } catch (error) {
+    console.error("Sayfa temizleme hatasi:", error);
   }
 
-  let missingParagraphs = [];
+  // 2) Yerel durumu temizle
+  items.forEach((item) => {
+    if (item.generatedAudio && item.generatedAudio.startsWith("blob:")) {
+      URL.revokeObjectURL(item.generatedAudio);
+    }
+    item.available = false;
+    item.audio = null;
+    item.generatedAudio = null;
+  });
+  if (state.manifest.pageAudio) {
+    delete state.manifest.pageAudio[String(state.page)];
+  }
+  renderPage();
+
+  // 3) Tum paragraflari sifirdan uret
   for (let i = 0; i < items.length; i++) {
-    const item = items[i];
-    if (!item.available && !item.generatedAudio) {
-      missingParagraphs.push({ index: i, text: item.text });
-    }
-  }
-
-  for (const paragraph of missingParagraphs) {
     let success = false;
     while (!success) {
-      success = await generateAudio(paragraph.index, paragraph.text, null, false);
+      success = await generateAudio(i, items[i].text, null, false);
       if (!success) {
-        updateStatus("Hata alindi, tekrar deneniyor...");
+        updateStatus(`Hata alindi (paragraf ${i + 1}/${items.length}), tekrar deneniyor...`);
         await new Promise((resolve) => setTimeout(resolve, 1500));
       }
     }
@@ -437,11 +447,11 @@ async function generatePageAudio() {
   if (els.generatePage) {
     els.generatePage.disabled = false;
     els.generatePage.innerHTML = "✅ Sayfa Üretildi";
-    els.generatePage.style.display = "none";
   }
 
   renderPage();
 
+  // 4) Birlesik sayfa sesini dene (yalnizca yerel sunucuda vardir)
   const mergeResponse = await fetch("/api/merge-page", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -455,9 +465,7 @@ async function generatePageAudio() {
     els.fullPageMode.checked = true;
     playCurrent();
   } else {
-    const errorText = await mergeResponse.text();
-    console.error("Sayfa birlestirme hatasi:", errorText);
-    updateStatus("Sayfa ses birlestirilemedi");
+    updateStatus("Sayfa seslendirildi");
   }
 }
 

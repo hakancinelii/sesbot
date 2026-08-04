@@ -232,6 +232,30 @@ class ReaderHandler(BaseHTTPRequestHandler):
                 self.send_error(500, str(e))
             return
 
+        if path == "/api/clear-page":
+            try:
+                content_length = int(self.headers.get("Content-Length", 0))
+                post_data = self.rfile.read(content_length)
+                data = json.loads(post_data.decode("utf-8"))
+                page = data.get("page")
+                if not isinstance(page, int):
+                    self.send_error(400, "Sayfa numarasi gerekli")
+                    return
+
+                deleted = []
+                for file_path in sorted(self.output_dir.glob(f"{page}_*.mp3")):
+                    file_path.unlink(missing_ok=True)
+                    deleted.append(file_path.name)
+                merged = self.output_dir / f"{page}.mp3"
+                if merged.exists():
+                    merged.unlink()
+                    deleted.append(merged.name)
+
+                self._send_json({"deleted": deleted, "count": len(deleted)})
+            except Exception as e:
+                self.send_error(500, str(e))
+            return
+
         self.send_error(404)
 
     def _send_json(self, payload: dict) -> None:
