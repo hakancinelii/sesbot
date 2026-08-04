@@ -26,9 +26,9 @@ const els = {
 };
 
 async function init() {
-  let response = await fetch("/manifest.json");
+  let response = await fetch("/api/manifest", { cache: "no-store" });
   if (!response.ok) {
-    response = await fetch("/api/manifest");
+    response = await fetch("/manifest.json", { cache: "no-store" });
   }
   state.manifest = await response.json();
 
@@ -334,10 +334,15 @@ async function generateAudio(paraIndex, text, btnElement = null, autoPlay = true
 
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
-    
-    // Store url in state
+    const generatedPath = response.headers.get("X-Generated-Audio-Path");
+
+    // Store generated audio path and blob URL in state
     const items = getPageItems(state.page);
     if (items[paraIndex]) {
+      if (generatedPath) {
+        items[paraIndex].audio = generatedPath;
+        items[paraIndex].available = true;
+      }
       items[paraIndex].generatedAudio = url;
     }
 

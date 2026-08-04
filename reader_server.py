@@ -142,17 +142,19 @@ class ReaderHandler(BaseHTTPRequestHandler):
 
                 page = data.get("page")
                 paragraph_index = data.get("paragraphIndex")
+                generated_path = None
                 if page is not None and isinstance(paragraph_index, int):
                     page_key = str(page).replace("/", "_")
                     file_name = f"{page_key}_{paragraph_index + 1}.mp3"
                     save_path = self.output_dir / file_name
                     save_path.write_bytes(audio_bytes)
+                    generated_path = f"/audio/{file_name}"
                     print(f"[okuyucu] Ses kaydedildi: {save_path}")
 
                     page_str = str(page)
                     paragraph_list = self.manifest.get("pages", {}).get(page_str)
                     if paragraph_list and 0 <= paragraph_index < len(paragraph_list):
-                        paragraph_list[paragraph_index]["audio"] = f"/audio/{file_name}"
+                        paragraph_list[paragraph_index]["audio"] = generated_path
                         paragraph_list[paragraph_index]["available"] = True
                         if page_str not in map(str, self.manifest.get("availablePages", [])):
                             self.manifest.setdefault("availablePages", []).append(int(page_str))
@@ -161,6 +163,8 @@ class ReaderHandler(BaseHTTPRequestHandler):
                 self.send_response(200)
                 self.send_header("Content-Type", "audio/mpeg")
                 self.send_header("Content-Length", str(len(audio_bytes)))
+                if generated_path is not None:
+                    self.send_header("X-Generated-Audio-Path", generated_path)
                 self.end_headers()
                 self.wfile.write(audio_bytes)
                 print(f"[okuyucu] Ses uretildi ve donduruldu.")

@@ -11,6 +11,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -207,17 +208,30 @@ CHAR_MAP = {
 
 
 def clean_text(text: str) -> str:
+    normalized = unicodedata.normalize("NFKC", text)
     cleaned = []
-    for char in text.replace("\\", "k"):
+    for char in normalized:
+        if char == SOFT_HYPHEN:
+            continue
         cp = ord(char)
         if cp in CHAR_MAP:
             cleaned.append(CHAR_MAP[cp])
-        elif cp > 0x024F and cp not in (0x2026, 0x2013, 0x2014, 0x2018, 0x2019, 0x201C, 0x201D, 0x00AB, 0x00BB):
-            # Bilinmeyen bozuk karakterleri yoksay
-            pass
-        else:
-            cleaned.append(char)
+            continue
+        category = unicodedata.category(char)
+        if category.startswith("C"):
+            continue
+        cleaned.append(char)
     return "".join(cleaned)
+
+
+def join_spans(spans: list[dict]) -> str:
+    line_text = ""
+    for span in spans:
+        part = clean_text(span["text"])
+        if line_text and not line_text[-1].isspace() and not line_text.endswith("-") and part and not part[0].isspace():
+            line_text += " "
+        line_text += part
+    return line_text
 
 
 def extract_page_blocks(doc: fitz.Document, pdf_index: int) -> list[str]:
@@ -226,7 +240,7 @@ def extract_page_blocks(doc: fitz.Document, pdf_index: int) -> list[str]:
         if block.get("type") != 0:
             continue
         block_text = "\n".join(
-            "".join(clean_text(span["text"]) for span in line.get("spans", []))
+            join_spans(line.get("spans", []))
             for line in block.get("lines", [])
         )
         for paragraph in split_paragraphs(block_text):

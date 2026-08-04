@@ -1,4 +1,6 @@
 public/
+output/
+.venv/
 .vercel
 __pycache__/
 *.pyc
