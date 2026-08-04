@@ -142,6 +142,8 @@ def main() -> None:
 
     extra_paths = [
         ROOT / "api" / "generate.py",
+        ROOT / "api" / "lib" / "__init__.py",
+        ROOT / "api" / "lib" / "supabase_storage.py",
         ROOT / "requirements.txt",
         ROOT / "vercel.json",
         ROOT / "amazon_reference_50s.mp3",

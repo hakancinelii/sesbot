@@ -10,13 +10,47 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "api"))
 
 from reader_server import build_manifest  # noqa: E402
+from lib.supabase_storage import is_configured, upload_file  # noqa: E402
 
 PUBLIC = ROOT / "public"
 READER = ROOT / "reader"
 OUTPUT = ROOT / "output"
 PDF = ROOT / "Dan-Brown-Sirlarin-Sirri.pdf"
+
+
+def rewrite_manifest_with_supabase(manifest: dict, url_map: dict[str, str]) -> dict:
+    for items in manifest.get("pages", {}).values():
+        for item in items:
+            audio = item.get("audio")
+            if audio:
+                name = audio.rsplit("/", 1)[-1]
+                if name in url_map:
+                    item["audio"] = url_map[name]
+    page_audio = manifest.get("pageAudio", {})
+    for page_key, audio in list(page_audio.items()):
+        name = audio.rsplit("/", 1)[-1]
+        if name in url_map:
+            page_audio[page_key] = url_map[name]
+    return manifest
+
+
+def upload_audio_to_supabase(audio_dir: Path) -> dict[str, str]:
+    url_map: dict[str, str] = {}
+    if not is_configured():
+        print("Supabase yapilandirilmadi, audio Supabase'e yuklenmeyecek.")
+        return url_map
+    for mp3 in sorted(audio_dir.glob("*.mp3")):
+        key = f"audio/pages/{mp3.name}"
+        try:
+            url = upload_file(key, str(mp3))
+            url_map[mp3.name] = url
+        except Exception as exc:
+            print(f"  Supabase yukleme hatasi ({mp3.name}): {exc}")
+    print(f"Supabase'e {len(url_map)} ses dosyasi yuklendi.")
+    return url_map
 
 
 def main() -> None:
@@ -34,6 +68,9 @@ def main() -> None:
         copied += 1
 
     manifest = build_manifest(PDF, OUTPUT)
+    url_map = upload_audio_to_supabase(audio_dir)
+    if url_map:
+        manifest = rewrite_manifest_with_supabase(manifest, url_map)
     PUBLIC.mkdir(exist_ok=True)
     (PUBLIC / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),

@@ -10,6 +10,8 @@ import os
 import time
 import requests
 
+from lib.supabase_storage import is_configured, upload_bytes
+
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         try:
@@ -103,12 +105,26 @@ class handler(BaseHTTPRequestHandler):
 
             audio_resp = session.get(audio_url, timeout=30)
             audio_resp.raise_for_status()
-            
+
+            audio_bytes = audio_resp.content
+            supabase_url = None
+            page = data.get("page")
+            paragraph_index = data.get("paragraphIndex")
+            if page is not None and isinstance(paragraph_index, int) and is_configured():
+                key = f"audio/pages/{str(page).replace('/', '_')}_{paragraph_index + 1}.mp3"
+                try:
+                    supabase_url = upload_bytes(key, audio_bytes)
+                    print(f"Supabase'e yuklendi: {key}")
+                except Exception as exc:
+                    print(f"Supabase yukleme hatasi (atlandi): {exc}")
+
             self.send_response(200)
             self.send_header("Content-Type", "audio/mpeg")
-            self.send_header("Content-Length", str(len(audio_resp.content)))
+            self.send_header("Content-Length", str(len(audio_bytes)))
+            if supabase_url:
+                self.send_header("X-Supabase-Audio-Url", supabase_url)
             self.end_headers()
-            self.wfile.write(audio_resp.content)
+            self.wfile.write(audio_bytes)
             
         except Exception as e:
             self.send_response(500)

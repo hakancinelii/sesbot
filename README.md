@@ -140,3 +140,49 @@ python3 scripts/deploy_vercel.sh
 
 **Guvenlik:** Vercel token'inizi kimseyle paylasmayin ve sohbette paylastiysaniz Vercel panelinden yenileyin.
 
+## Supabase ile ses depolama
+
+Yeni uretilen seslerin kalici olarak saklanmasi icin Supabase Storage kullanilir.
+Ayarlanmazsa eski akis calismaya devam eder (sesler Vercel deploy'una gomulur).
+
+### 1. Supabase'de proje ve bucket olusturun
+
+1. [supabase.com](https://supabase.com) adresinden proje olusturun.
+2. Sol menuden **Storage** -> **New bucket**:
+   - Name: `audio`
+   - Public bucket: **ACIK** (onemli, tarayicidan erisilebilmesi icin)
+3. **Project Settings -> API** sayfasindan:
+   - `Project URL` (orn. `https://xyzcompany.supabase.co`)
+   - `service_role` anahtari
+
+### 2. Vercel ortam degiskenlerini ekleyin
+
+Vercel panelinde proje -> **Settings -> Environment Variables**:
+
+| Ad | Deger |
+|----|-------|
+| `SUPABASE_URL` | `https://<proje>.supabase.co` |
+| `SUPABASE_SERVICE_KEY` | `service_role` anahtari |
+| `SUPABASE_BUCKET` | `audio` |
+
+### 3. Yeniden deploy edin
+
+```bash
+export VERCEL_TOKEN="vercel_tokeniniz"
+export SUPABASE_URL="https://<proje>.supabase.co"
+export SUPABASE_SERVICE_KEY="service_role_anahtariniz"
+export SUPABASE_BUCKET="audio"
+python3 scripts/deploy_vercel.py --token "$VERCEL_TOKEN"
+```
+
+Deploy sirasinda mevcut ses dosyalari `audio/pages/` altina Supabase'e yuklenir ve
+`manifest.json`'daki ses adresleri Supabase URL'leriyle degistirilir.
+
+### Calisma sekli
+
+- **Dinamik uretim** (`/api/generate`): Uretilen her ses Supabase'e yuklenir ve
+  tarayiciya `X-Supabase-Audio-Url` basligiyla doner.
+- **Deploy**: `build_vercel.py` tum mevcut MP3'leri Supabase'e yukler ve manifest'i
+  gunceller; sonraki sayfalarda okuyucu sesleri Supabase'den calar.
+- Supabase yapilandirilmamissa (`SUPABASE_*` yoksa) kod eski davranisi korur.
+

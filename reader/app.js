@@ -344,11 +344,15 @@ async function generateAudio(paraIndex, text, btnElement = null, autoPlay = true
     const blob = await response.blob();
     const url = URL.createObjectURL(blob);
     const generatedPath = response.headers.get("X-Generated-Audio-Path");
+    const supabaseUrl = response.headers.get("X-Supabase-Audio-Url");
 
     // Store generated audio path and blob URL in state
     const items = getPageItems(state.page);
     if (items[paraIndex]) {
-      if (generatedPath) {
+      if (supabaseUrl) {
+        items[paraIndex].audio = supabaseUrl;
+        items[paraIndex].available = true;
+      } else if (generatedPath) {
         items[paraIndex].audio = generatedPath;
         items[paraIndex].available = true;
       }
