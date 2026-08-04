@@ -38,9 +38,9 @@ function saveLastPage() {
 }
 
 async function init() {
-  let response = await fetch("/api/manifest", { cache: "no-store" });
+  const response = await fetch("/manifest.json", { cache: "no-store" });
   if (!response.ok) {
-    response = await fetch("/manifest.json", { cache: "no-store" });
+    throw new Error(`Manifest yuklenemedi: ${response.status}`);
   }
   state.manifest = await response.json();
 
