@@ -68,6 +68,7 @@ def _get_pages():
                 "text": paragraph.text,
                 "audio": None,
                 "available": False,
+                "heading": paragraph.heading,
             }
         )
     _pages_cache = pages

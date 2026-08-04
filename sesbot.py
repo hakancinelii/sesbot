@@ -29,6 +29,7 @@ class Paragraph:
     book_page: int
     index_on_page: int
     text: str
+    heading: bool = False
 
     @property
     def filename(self) -> str:
@@ -292,6 +293,19 @@ def find_ocr_text() -> Optional[Path]:
     return None
 
 
+CHAPTER_HEADING_RE = re.compile(r"^\d{1,3}\.\s*BÖLÜM$", re.IGNORECASE)
+STANDALONE_HEADINGS = {"ÖNSÖZ", "SONSÖZ", "EPİLOG", "EPILOG", "PROLOG", "PROLOGUE"}
+
+
+def is_chapter_heading(line: str) -> bool:
+    s = line.strip().strip("\"'").strip()
+    if not s:
+        return False
+    if CHAPTER_HEADING_RE.match(s):
+        return True
+    return s.upper() in STANDALONE_HEADINGS
+
+
 def extract_paragraphs_from_ocr(
     ocr_path: Path,
     start_page: int = 1,
@@ -300,11 +314,22 @@ def extract_paragraphs_from_ocr(
     data = json.loads(ocr_path.read_text(encoding="utf-8"))
 
     pages: dict[int, str] = {}
+    headings: dict[int, str] = {}
     for pdf_index, entry in data.items():
         book_page = entry.get("book_page")
         text = entry.get("text", "")
-        if book_page is not None and text.strip():
-            pages[book_page] = text
+        if book_page is None or not text.strip():
+            continue
+        page_text = clean_ocr_text(text)
+        page_text = re.sub(r"\s+\d{1,4}\s*$", "", page_text.rstrip())
+
+        body_lines: list[str] = []
+        for line in page_text.splitlines():
+            if book_page not in headings and is_chapter_heading(line):
+                headings[book_page] = line.strip().strip("\"'").strip()
+            else:
+                body_lines.append(line)
+        pages[book_page] = "\n".join(body_lines)
 
     last_page = end_page or max(pages)
     merge_start = max(1, start_page - 1)
@@ -313,17 +338,34 @@ def extract_paragraphs_from_ocr(
     for book_page in sorted(pages):
         if book_page < merge_start or book_page > last_page:
             continue
-        page_text = clean_ocr_text(pages[book_page])
-        # alt bilgideki sayfa numarasini ayikla (satir sonundaki rakam)
-        page_text = re.sub(r"\s+\d{1,4}\s*$", "", page_text.rstrip())
-        for index, text in enumerate(split_paragraphs(page_text), start=1):
+        for index, text in enumerate(split_paragraphs(pages[book_page]), start=1):
             if not is_noise(text):
                 raw_paragraphs.append(
                     Paragraph(book_page=book_page, index_on_page=index, text=text)
                 )
 
     merged = merge_cross_page_paragraphs(raw_paragraphs)
-    return [p for p in merged if start_page <= p.book_page <= last_page]
+
+    body_by_page: dict[int, list[Paragraph]] = {}
+    for paragraph in merged:
+        body_by_page.setdefault(paragraph.book_page, []).append(paragraph)
+
+    final: list[Paragraph] = []
+    all_pages = sorted(set(pages) | set(body_by_page))
+    for book_page in all_pages:
+        if book_page < start_page or book_page > last_page:
+            continue
+        if book_page in headings:
+            final.append(
+                Paragraph(
+                    book_page=book_page,
+                    index_on_page=0,
+                    text=headings[book_page],
+                    heading=True,
+                )
+            )
+        final.extend(body_by_page.get(book_page, []))
+    return final
 
 
 def extract_paragraphs(

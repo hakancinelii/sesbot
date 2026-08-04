@@ -206,6 +206,23 @@ h1 {
   position: relative;
 }
 
+.paragraph.chapter-heading {
+  text-align: center;
+  font-size: 1.65rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  border-left: none;
+  padding-left: 0;
+  margin: 0.4em 0 1.8em;
+  color: var(--accent);
+  cursor: default;
+}
+
+.paragraph.chapter-heading:hover {
+  background: transparent;
+}
+
 .btn-generate {
   display: inline-block;
   margin-left: 12px;

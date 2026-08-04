@@ -133,11 +133,37 @@ function getPageItems(page) {
   return state.manifest.pages[String(page)] || [];
 }
 
+function isPlayable(item) {
+  return item && !item.heading && (item.available || item.generatedAudio);
+}
+
+function nextPlayableIndex(page, fromIndex, delta) {
+  const items = getPageItems(page);
+  let i = fromIndex + delta;
+  while (i >= 0 && i < items.length) {
+    if (items[i] && !items[i].heading) return i;
+    i += delta;
+  }
+  return null;
+}
+
+function firstPlayableIndex(page) {
+  return nextPlayableIndex(page, -1, 1);
+}
+
 function buildSheet(items) {
   const sheet = document.createElement("div");
   sheet.className = "page-sheet";
 
   items.forEach((item, index) => {
+    if (item.heading) {
+      const heading = document.createElement("h2");
+      heading.className = "paragraph chapter-heading";
+      heading.textContent = item.text;
+      sheet.appendChild(heading);
+      return;
+    }
+
     const para = document.createElement("p");
     para.className = "paragraph";
     para.dataset.index = String(index);
@@ -185,6 +211,10 @@ function renderPage() {
   if (state.paragraphIndex >= items.length) {
     state.paragraphIndex = 0;
   }
+  if (items[state.paragraphIndex]?.heading) {
+    const first = firstPlayableIndex(state.page);
+    if (first !== null) state.paragraphIndex = first;
+  }
 
   els.reader.innerHTML = "";
   els.reader.appendChild(buildSheet(items));
@@ -216,9 +246,13 @@ function highlightParagraph(scroll = true) {
   }
 
   const items = getPageItems(state.page);
-  const total = items.length;
-  els.progressLabel.textContent = total
-    ? `Paragraf ${state.paragraphIndex + 1}/${total}`
+  const playable = items.filter((it) => !it.heading);
+  let current = 0;
+  for (let i = 0; i <= state.paragraphIndex; i++) {
+    if (items[i] && !items[i].heading) current++;
+  }
+  els.progressLabel.textContent = playable.length
+    ? `Paragraf ${current}/${playable.length}`
     : "Paragraf —";
 }
 
@@ -284,7 +318,8 @@ function navigateToPage(targetPage, delta, { autoplay = false } = {}) {
 
   state.page = targetPage;
   saveLastPage();
-  state.paragraphIndex = 0;
+  const first = firstPlayableIndex(targetPage);
+  state.paragraphIndex = first !== null ? first : 0;
   stopPlayback();
 
   animatePageFlip(oldItems, getPageItems(targetPage), delta, () => {
@@ -301,9 +336,8 @@ function changePage(delta) {
 }
 
 function changeParagraph(delta, autoplay = false) {
-  const items = getPageItems(state.page);
-  const next = state.paragraphIndex + delta;
-  if (next < 0 || next >= items.length) return;
+  const next = nextPlayableIndex(state.page, state.paragraphIndex, delta);
+  if (next === null) return;
 
   state.paragraphIndex = next;
   highlightParagraph();
@@ -334,8 +368,20 @@ function playCurrent() {
   }
 
   const items = getPageItems(state.page);
-  const current = items[state.paragraphIndex];
-  if (!current?.available && !current?.generatedAudio) {
+  let idx = state.paragraphIndex;
+  if (items[idx]?.heading) {
+    const next = nextPlayableIndex(state.page, idx, 1);
+    if (next === null) {
+      updateStatus("Bu sayfada seslendirilecek metin yok");
+      return;
+    }
+    state.paragraphIndex = next;
+    highlightParagraph();
+    idx = next;
+  }
+
+  const current = items[idx];
+  if (!isPlayable(current)) {
     updateStatus("Bu paragraf icin ses yok");
     return;
   }
@@ -346,7 +392,7 @@ function playCurrent() {
     return;
   }
 
-  loadAndPlay(audioSrc, `Sayfa ${state.page}, paragraf ${state.paragraphIndex + 1}`);
+  loadAndPlay(audioSrc, `Sayfa ${state.page}, paragraf ${idx + 1}`);
 }
 
 function loadAndPlay(src, label) {
@@ -379,9 +425,9 @@ function onAudioEnded() {
     return;
   }
 
-  const items = getPageItems(state.page);
-  if (state.paragraphIndex < items.length - 1) {
-    state.paragraphIndex += 1;
+  const nextPara = nextPlayableIndex(state.page, state.paragraphIndex, 1);
+  if (nextPara !== null) {
+    state.paragraphIndex = nextPara;
     highlightParagraph();
     playCurrent();
     return;

@@ -46,6 +46,7 @@ def build_manifest(pdf_path: Path, output_dir: Path) -> dict:
                 "text": paragraph.text,
                 "audio": f"/audio/{audio_name}" if audio_path.exists() else None,
                 "available": audio_path.exists(),
+                "heading": paragraph.heading,
             }
         )
 
