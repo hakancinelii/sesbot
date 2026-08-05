@@ -33,6 +33,7 @@ REFERENCE = ROOT / "amazon_reference_50s.mp3"
 MERGE_URL = "https://sesbot-okuyucu-theta.vercel.app/api/merge-page"
 
 PARA_RE = re.compile(r"^\d+_\d+\.mp3$")
+MAX_RETRIES = 30
 
 
 def log(msg: str) -> None:
@@ -92,7 +93,8 @@ def main() -> None:
         page_ok = True
         for para in missing:
             ok_uploaded = False
-            for attempt in range(1, 6):
+            attempt = 1
+            while attempt <= MAX_RETRIES:
                 try:
                     result = client.generate(para.text)
                     audio_url = result.get("url")
@@ -106,9 +108,17 @@ def main() -> None:
                     ok_uploaded = True
                     break
                 except Exception as exc:
+                    is_503 = "503" in str(exc) or "Service Unavailable" in str(exc)
+                    if is_503:
+                        wait = 180
+                        log(f"  {para.filename} API 503 (kisitlama) -> {wait}s sonra tekrar")
+                        time.sleep(wait)
+                        attempt += 1
+                        continue
                     wait = 20 * attempt
-                    log(f"  {para.filename} hata ({attempt}/5): {exc} -> {wait}s sonra tekrar")
+                    log(f"  {para.filename} hata ({attempt}/{MAX_RETRIES}): {exc} -> {wait}s sonra tekrar")
                     time.sleep(wait)
+                    attempt += 1
             if not ok_uploaded:
                 log(f"  {para.filename} BASARISIZ, sayfa atlaniyor.")
                 page_ok = False
