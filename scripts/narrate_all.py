@@ -34,6 +34,7 @@ MERGE_URL = "https://sesbot-okuyucu-theta.vercel.app/api/merge-page"
 
 PARA_RE = re.compile(r"^\d+_\d+\.mp3$")
 MAX_RETRIES = 30
+CONSECUTIVE_503_EXIT = 3
 
 
 def log(msg: str) -> None:
@@ -91,6 +92,7 @@ def main() -> None:
             f"(kalan toplam ~{sum(1 for p in paragraphs if not p.heading and p.filename not in done)})")
 
         page_ok = True
+        consecutive_503 = 0
         for para in missing:
             ok_uploaded = False
             attempt = 1
@@ -103,6 +105,7 @@ def main() -> None:
                     audio = requests.get(audio_url, timeout=120).content
                     upload_bytes(f"audio/pages/{para.filename}", audio)
                     done.add(para.filename)
+                    consecutive_503 = 0
                     log(f"  {para.filename} OK ({len(audio)} byte, "
                         f"kalan {sum(1 for p in paragraphs if not p.heading and p.filename not in done)})")
                     ok_uploaded = True
@@ -110,6 +113,12 @@ def main() -> None:
                 except Exception as exc:
                     is_503 = "503" in str(exc) or "Service Unavailable" in str(exc)
                     if is_503:
+                        consecutive_503 += 1
+                        if consecutive_503 >= CONSECUTIVE_503_EXIT:
+                            log("API kuyrugu kapali (3x503), is cikiliyor. Watcher yeniden baslatacak.")
+                            with open(PROGRESS, "w", encoding="utf-8") as handle:
+                                json.dump({"last_page": book_page, "done": len(done), "skipped": skipped}, handle)
+                            sys.exit(0)
                         wait = 180
                         log(f"  {para.filename} API 503 (kisitlama) -> {wait}s sonra tekrar")
                         time.sleep(wait)
