@@ -14,6 +14,8 @@ const state = {
   transitionTimer: null,
   generationCancelled: false,
   autoNarration: false,
+  immersive: false,
+  wakeLock: null,
 };
 
 const els = {
@@ -33,6 +35,8 @@ const els = {
   playPause: document.getElementById("play-pause"),
   stop: document.getElementById("stop"),
   generatePage: document.getElementById("generate-page"),
+  immersiveToggle: document.getElementById("immersive-toggle"),
+  immersiveExit: document.getElementById("immersive-exit"),
 };
 
 function loadLastPage() {
@@ -117,10 +121,25 @@ function bindEvents() {
   els.audio.addEventListener("play", () => {
     setPlaying(true);
     rampVolume(1, FADE_IN_MS);
+    if (state.immersive) requestWakeLock();
   });
   els.audio.addEventListener("pause", () => {
     setPlaying(false);
     cancelVolumeRamp();
+    releaseWakeLock();
+  });
+
+  if (els.immersiveToggle) {
+    els.immersiveToggle.addEventListener("click", () => setImmersive(!state.immersive));
+  }
+  if (els.immersiveExit) {
+    els.immersiveExit.addEventListener("click", () => setImmersive(false));
+  }
+
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "visible" && state.playing) {
+      requestWakeLock();
+    }
   });
 
   document.addEventListener("keydown", (event) => {
@@ -128,6 +147,9 @@ function bindEvents() {
     if (event.code === "Space") {
       event.preventDefault();
       togglePlayPause();
+    }
+    if (event.code === "Escape" && state.immersive) {
+      setImmersive(false);
     }
     if (event.code === "ArrowRight") changePage(1);
     if (event.code === "ArrowLeft") changePage(-1);
@@ -405,6 +427,39 @@ function togglePlayPause() {
   playCurrent();
 }
 
+function setImmersive(on) {
+  state.immersive = on;
+  document.body.classList.toggle("immersive", on);
+  if (on) {
+    if (state.playing) requestWakeLock();
+    if (document.documentElement.requestFullscreen) {
+      document.documentElement.requestFullscreen().catch(() => {});
+    }
+  } else {
+    releaseWakeLock();
+    if (document.fullscreenElement && document.exitFullscreen) {
+      document.exitFullscreen().catch(() => {});
+    }
+  }
+}
+
+async function requestWakeLock() {
+  try {
+    if ("wakeLock" in navigator && document.visibilityState === "visible") {
+      state.wakeLock = await navigator.wakeLock.request("screen");
+    }
+  } catch (error) {
+    console.warn("Wake lock alinamadi:", error);
+  }
+}
+
+function releaseWakeLock() {
+  if (state.wakeLock) {
+    state.wakeLock.release().catch(() => {});
+    state.wakeLock = null;
+  }
+}
+
 function playCurrent() {
   if (state.fullPageMode) {
     const src = state.manifest.pageAudio[String(state.page)];
@@ -519,6 +574,7 @@ function stopPlayback() {
     clearTimeout(state.transitionTimer);
     state.transitionTimer = null;
   }
+  releaseWakeLock();
   els.audio.volume = 1;
   els.audio.pause();
   els.audio.currentTime = 0;

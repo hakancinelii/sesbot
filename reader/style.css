@@ -298,6 +298,43 @@ h1 {
   font-weight: 600;
 }
 
+/* Tam ekran / odakli okuma modu */
+#immersive-exit {
+  display: none;
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 60;
+  opacity: 0.55;
+}
+
+.immersive #immersive-exit {
+  display: inline-block;
+}
+
+.immersive .toolbar,
+.immersive .player {
+  display: none;
+}
+
+.immersive .app {
+  grid-template-rows: 1fr;
+}
+
+.immersive .reader {
+  padding: 0;
+  background: var(--paper);
+}
+
+.immersive .page-sheet {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  max-width: 800px;
+  min-height: 100%;
+  padding: 56px 64px 80px;
+}
+
 @media (max-width: 720px) {
   .toolbar {
     flex-wrap: wrap;

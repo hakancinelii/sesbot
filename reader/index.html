@@ -24,6 +24,7 @@
           <input id="full-page-mode" type="checkbox">
           Tum sayfa sesi
         </label>
+        <button id="immersive-toggle" class="btn" title="Tam ekran okuma modu">⛶</button>
       </div>
     </header>
 
@@ -46,7 +47,8 @@
     </footer>
   </div>
 
-  <audio id="audio" preload="auto"></audio>
+  <button id="immersive-exit" class="btn" title="Tam ekran modundan cik">✕</button>
+  <audio id="audio" preload="auto" playsinline webkit-playsinline></audio>
   <script src="/app.js"></script>
 </body>
 </html>
