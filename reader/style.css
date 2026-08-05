@@ -330,9 +330,15 @@ h1 {
   border: none;
   border-radius: 0;
   box-shadow: none;
-  max-width: 800px;
+  max-width: 100%;
   min-height: 100%;
-  padding: 56px 64px 80px;
+  padding: 56px clamp(28px, 5vw, 96px) 80px;
+}
+
+.immersive .paragraph {
+  font-size: 1.18rem;
+  line-height: 1.9;
+  text-align: justify;
 }
 
 @media (max-width: 720px) {
