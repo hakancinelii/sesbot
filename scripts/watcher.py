@@ -59,10 +59,11 @@ def batch_running() -> bool:
 def launch_batch() -> None:
     env = os.environ.copy()
     env.update(ENV)
-    log("API acik, batch baslatiliyor...")
+    workers = os.environ.get("NARRATE_WORKERS", "2")
+    log(f"API acik, batch baslatiliyor... (workers={workers})")
     with open(ROOT / "narrate_all.log", "a", encoding="utf-8") as handle:
         subprocess.Popen(
-            [str(ROOT / ".venv" / "bin" / "python"), str(ROOT / "scripts" / "narrate_all.py")],
+            [str(ROOT / ".venv" / "bin" / "python"), str(ROOT / "scripts" / "narrate_all.py"), "--workers", workers],
             cwd=str(ROOT),
             env=env,
             stdout=handle,

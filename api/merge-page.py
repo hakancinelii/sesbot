@@ -20,18 +20,28 @@ def _supabase_config():
 
 def _list_files(prefix):
     cfg = _supabase_config()
-    req = urllib.request.Request(
-        f"{cfg['url']}/storage/v1/object/list/{cfg['bucket']}",
-        data=json.dumps({"prefix": prefix, "limit": 1000, "offset": 0}).encode("utf-8"),
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {cfg['key']}",
-            "apikey": cfg["key"],
-            "Content-Type": "application/json",
-        },
-    )
-    with urllib.request.urlopen(req, timeout=60) as resp:
-        return [i.get("name") for i in json.loads(resp.read().decode("utf-8")) if i.get("name")]
+    names = []
+    offset = 0
+    while True:
+        req = urllib.request.Request(
+            f"{cfg['url']}/storage/v1/object/list/{cfg['bucket']}",
+            data=json.dumps({"prefix": prefix, "limit": 1000, "offset": offset}).encode("utf-8"),
+            method="POST",
+            headers={
+                "Authorization": f"Bearer {cfg['key']}",
+                "apikey": cfg["key"],
+                "Content-Type": "application/json",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=60) as resp:
+            items = [i.get("name") for i in json.loads(resp.read().decode("utf-8")) if i.get("name")]
+        if not items:
+            break
+        names.extend(items)
+        if len(items) < 1000:
+            break
+        offset += 1000
+    return names
 
 
 def _download(url):

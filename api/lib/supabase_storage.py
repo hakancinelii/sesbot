@@ -69,22 +69,33 @@ def list_files(prefix: str = "") -> list[dict]:
         raise RuntimeError("Supabase yapilandirilmadi (SUPABASE_URL/KEY/BUCKET eksik).")
 
     url = f"{cfg['url']}/storage/v1/object/list/{cfg['bucket']}"
-    payload = json.dumps(
-        {"prefix": prefix, "limit": 1000, "offset": 0}
-    ).encode("utf-8")
     headers = {
         "Authorization": f"Bearer {cfg['key']}",
         "apikey": cfg["key"],
         "Content-Type": "application/json",
     }
-    request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            items = json.loads(response.read().decode("utf-8"))
-            return [i for i in items if i.get("metadata") and i.get("name")]
-    except urllib.error.HTTPError as exc:
-        detail = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"Supabase listeleme hatasi ({exc.code}): {detail}") from exc
+
+    result: list[dict] = []
+    offset = 0
+    while True:
+        payload = json.dumps(
+            {"prefix": prefix, "limit": 1000, "offset": offset}
+        ).encode("utf-8")
+        request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                items = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode("utf-8", errors="replace")
+            raise RuntimeError(f"Supabase listeleme hatasi ({exc.code}): {detail}") from exc
+
+        if not items:
+            break
+        result.extend(i for i in items if i.get("metadata") and i.get("name"))
+        if len(items) < 1000:
+            break
+        offset += 1000
+    return result
 
 
 def file_urls(prefix: str = "") -> dict[str, str]:

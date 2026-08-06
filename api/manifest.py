@@ -25,31 +25,45 @@ def _supabase_configured():
 
 
 def _supabase_audio_urls():
-    """Supabase bucket icindeki sesleri {dosya_adi: public_url} olarak doner."""
+    """Supabase bucket icindeki tum sesleri {dosya_adi: public_url} olarak doner.
+
+    Supabase list API'si en fazla 1000 dosya doner; kalanini almak icin
+    sayfalamayla devam eder.
+    """
     import urllib.request
 
     cfg = _supabase_config()
     url = f"{cfg['url']}/storage/v1/object/list/{cfg['bucket']}"
-    payload = json.dumps({"prefix": "audio/pages/", "limit": 1000, "offset": 0}).encode("utf-8")
     headers = {
         "Authorization": f"Bearer {cfg['key']}",
         "apikey": cfg["key"],
         "Content-Type": "application/json",
     }
-    request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=60) as response:
-            items = json.loads(response.read().decode("utf-8"))
-    except Exception:
-        return {}
 
     result = {}
-    for item in items:
-        name = item.get("name")
-        if name:
-            result[name] = (
-                f"{cfg['url']}/storage/v1/object/public/{cfg['bucket']}/audio/pages/{name}"
-            )
+    offset = 0
+    while True:
+        payload = json.dumps(
+            {"prefix": "audio/pages/", "limit": 1000, "offset": offset}
+        ).encode("utf-8")
+        request = urllib.request.Request(url, data=payload, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(request, timeout=60) as response:
+                items = json.loads(response.read().decode("utf-8"))
+        except Exception:
+            return result
+
+        if not items:
+            break
+        for item in items:
+            name = item.get("name")
+            if name:
+                result[name] = (
+                    f"{cfg['url']}/storage/v1/object/public/{cfg['bucket']}/audio/pages/{name}"
+                )
+        if len(items) < 1000:
+            break
+        offset += 1000
     return result
 
 
