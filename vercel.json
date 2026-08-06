@@ -9,6 +9,9 @@
     "api/generate.py": {
       "maxDuration": 120
     },
+    "api/clear-page.py": {
+      "maxDuration": 120
+    },
     "api/merge-page.py": {
       "maxDuration": 120
     }

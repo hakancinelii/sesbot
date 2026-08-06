@@ -254,6 +254,11 @@ function buildSheet(items) {
     sheet.appendChild(para);
   });
 
+  const footer = document.createElement("div");
+  footer.className = "page-footer";
+  footer.textContent = String(state.page);
+  sheet.appendChild(footer);
+
   return sheet;
 }
 

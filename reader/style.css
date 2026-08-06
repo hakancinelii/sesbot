@@ -181,6 +181,21 @@ h1 {
   text-align: center;
 }
 
+.page-footer {
+  margin-top: 2.4em;
+  padding-top: 1.2em;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  color: var(--muted);
+  font-size: 0.92rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.immersive .page-footer {
+  color: rgba(31, 26, 23, 0.5);
+  border-top-color: rgba(74, 47, 23, 0.18);
+}
+
 .cover-image {
   max-width: min(360px, 100%);
   width: 100%;
@@ -339,6 +354,16 @@ h1 {
   background: var(--paper);
 }
 
+.immersive .reader {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 36px clamp(16px, 4vw, 64px) 64px;
+  background:
+    radial-gradient(120% 80% at 50% 0%, rgba(255, 255, 255, 0.05), transparent 60%),
+    linear-gradient(160deg, #2a2119, #1d1712);
+}
+
 .immersive .page-sheet {
   border: none;
   border-radius: 0;
@@ -346,6 +371,62 @@ h1 {
   max-width: 100%;
   min-height: 100%;
   padding: 56px clamp(28px, 5vw, 96px) 80px;
+}
+
+.immersive .page-sheet {
+  position: relative;
+  max-width: min(860px, 100%);
+  width: 100%;
+  min-height: calc(100vh - 100px);
+  background:
+    linear-gradient(90deg, rgba(74, 47, 23, 0.12) 0%, transparent 4%),
+    linear-gradient(90deg, transparent 96%, rgba(74, 47, 23, 0.08) 100%),
+    var(--paper);
+  border-radius: 4px 14px 14px 4px;
+  box-shadow:
+    0 26px 70px rgba(0, 0, 0, 0.55),
+    0 4px 14px rgba(0, 0, 0, 0.35),
+    inset 0 0 70px rgba(139, 69, 19, 0.045),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+  padding: clamp(44px, 6vh, 72px) clamp(40px, 7vw, 110px) 72px;
+}
+
+.immersive .sheet-layer {
+  top: 36px;
+  right: clamp(16px, 4vw, 64px);
+  bottom: 64px;
+  left: clamp(16px, 4vw, 64px);
+  align-items: flex-start;
+}
+
+.immersive .sheet-layer.flip .page-sheet {
+  box-shadow:
+    0 26px 70px rgba(0, 0, 0, 0.55),
+    0 4px 14px rgba(0, 0, 0, 0.35);
+}
+
+.immersive .page-sheet::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
+  width: 34px;
+  background: linear-gradient(90deg, rgba(0, 0, 0, 0.12), rgba(0, 0, 0, 0.03) 55%, transparent);
+  border-radius: 4px 0 0 4px;
+  pointer-events: none;
+}
+
+.immersive .page-sheet::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 34px;
+  right: 34px;
+  height: 6px;
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.08), transparent);
+  border-radius: 0 0 50% 50%;
+  pointer-events: none;
 }
 
 .immersive .paragraph {

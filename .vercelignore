@@ -1,0 +1,11 @@
+.local
+.venv
+.git
+.vscode
+.DS_Store
+output
+test_*.log
+narrate_all.log
+narrate_progress.json
+watcher.log
+*.ipynb
