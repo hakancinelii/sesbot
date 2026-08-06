@@ -63,10 +63,11 @@ async function init() {
 
   els.bookTitle.textContent = state.manifest.title.replace(/-/g, " ");
   const lastPage = loadLastPage();
+  const firstPage = getPageList()[0] || 1;
   if (lastPage && state.manifest.pages[String(lastPage)]) {
     state.page = lastPage;
-  } else if (state.manifest.availablePages.length) {
-    state.page = state.manifest.availablePages[0];
+  } else {
+    state.page = firstPage;
   }
 
   bindEvents();
@@ -202,6 +203,17 @@ function firstPlayableIndex(page) {
 function buildSheet(items) {
   const sheet = document.createElement("div");
   sheet.className = "page-sheet";
+
+  if (state.manifest.cover && state.page === getPageList()[0]) {
+    const figure = document.createElement("figure");
+    figure.className = "cover-figure";
+    const img = document.createElement("img");
+    img.className = "cover-image";
+    img.src = state.manifest.cover;
+    img.alt = state.manifest.title.replace(/-/g, " ");
+    figure.appendChild(img);
+    sheet.appendChild(figure);
+  }
 
   items.forEach((item, index) => {
     if (item.heading) {

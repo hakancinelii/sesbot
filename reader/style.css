@@ -176,6 +176,19 @@ h1 {
   box-shadow: 0 10px 30px var(--shadow);
 }
 
+.cover-figure {
+  margin: 0 0 1.8em;
+  text-align: center;
+}
+
+.cover-image {
+  max-width: min(360px, 100%);
+  width: 100%;
+  height: auto;
+  border-radius: 10px;
+  box-shadow: 0 14px 36px rgba(31, 26, 23, 0.22);
+}
+
 .paragraph {
   margin: 0 0 1.35em;
   line-height: 1.75;

@@ -306,6 +306,38 @@ def is_chapter_heading(line: str) -> bool:
     return s.upper() in STANDALONE_HEADINGS
 
 
+def front_matter_pages() -> list[Paragraph]:
+    """Kitabin on sayfalarini (kapak, kunye, ithaf vb.) sozde sayfa numaralariyla dondurur.
+
+    OCR'da book_page olmayan ilk sayfalar (PDF 0-7) sirasiyla 1..8
+    sayfalarina eslenir; kitap govdesi 9'dan baslar.
+    """
+    ocr_path = find_ocr_text()
+    if ocr_path is None:
+        return []
+    data = json.loads(ocr_path.read_text(encoding="utf-8"))
+
+    result: list[Paragraph] = []
+    pseudo_page = 1
+    for pdf_index in sorted(data, key=lambda k: int(k)):
+        entry = data[pdf_index]
+        if entry.get("book_page") is not None:
+            break
+        text = entry.get("text", "")
+        if not text.strip():
+            pseudo_page += 1
+            continue
+        page_text = clean_ocr_text(text)
+        page_text = re.sub(r"\s+\d{1,4}\s*$", "", page_text.rstrip())
+        for index, para in enumerate(split_paragraphs(page_text), start=1):
+            if not is_noise(para):
+                result.append(
+                    Paragraph(book_page=pseudo_page, index_on_page=index, text=para)
+                )
+        pseudo_page += 1
+    return result
+
+
 def extract_paragraphs_from_ocr(
     ocr_path: Path,
     start_page: int = 1,
@@ -351,6 +383,8 @@ def extract_paragraphs_from_ocr(
         body_by_page.setdefault(paragraph.book_page, []).append(paragraph)
 
     final: list[Paragraph] = []
+    if start_page <= 1:
+        final.extend(front_matter_pages())
     all_pages = sorted(set(pages) | set(body_by_page))
     for book_page in all_pages:
         if book_page < start_page or book_page > last_page:

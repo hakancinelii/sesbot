@@ -58,6 +58,7 @@ def build_manifest(pdf_path: Path, output_dir: Path) -> dict:
 
     return {
         "title": pdf_path.stem,
+        "cover": "/cover.png",
         "pages": pages,
         "availablePages": available_pages,
         "pageAudio": {
@@ -310,6 +311,7 @@ def main() -> None:
         webbrowser.open(url)
 
     try:
+        server = ThreadingHTTPServer((args.host, args.port), ReaderHandler)
         server.serve_forever()
     except KeyboardInterrupt:
         print("\nSunucu kapatildi.")

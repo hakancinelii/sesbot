@@ -80,6 +80,18 @@ def main() -> None:
             source = READER / name
             if source.exists():
                 shutil.copy2(source, PUBLIC / name)
+        for name in (
+            "cover.png",
+            "icon-192.png",
+            "icon-512.png",
+            "apple-touch-icon.png",
+            "favicon-16.png",
+            "favicon-32.png",
+            "site.webmanifest",
+        ):
+            source = READER / name
+            if source.exists():
+                shutil.copy2(source, PUBLIC / name)
 
     print(f"Vercel build hazir: {copied} yerel ses dosyasi, sayfalar {manifest['availablePages']}")
 

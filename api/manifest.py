@@ -81,6 +81,8 @@ def _build_manifest():
 
     for page_key, items in pages.items():
         for item in items:
+            if item.get("type") == "cover":
+                continue
             name = f"{page_key}_{item['index']}.mp3"
             if name in url_map:
                 item["audio"] = url_map[name]
@@ -99,6 +101,7 @@ def _build_manifest():
 
     return {
         "title": "Dan-Brown-Sirlarin-Sirri",
+        "cover": "/cover.png",
         "pages": pages,
         "availablePages": available_pages,
         "pageAudio": page_audio,
