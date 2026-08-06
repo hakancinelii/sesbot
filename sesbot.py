@@ -599,7 +599,7 @@ class VoxCPMClient:
             stream = self.session.get(
                 f"{self.space_url}/gradio_api/call/generate/{event_id}",
                 stream=True,
-                timeout=timeout_seconds,
+                timeout=min(120, timeout_seconds),
             )
             stream.raise_for_status()
 
@@ -612,6 +612,8 @@ class VoxCPMClient:
                     event_name = raw_line.split(":", 1)[1].strip()
                 elif raw_line.startswith("data:"):
                     data_lines.append(raw_line.split(":", 1)[1].strip())
+                if time.time() >= deadline:
+                    raise TimeoutError("VoxCPM yanit vermedi.")
 
             if event_name == "complete":
                 if not data_lines:
