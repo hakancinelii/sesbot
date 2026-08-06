@@ -138,17 +138,19 @@ def narrate_page(
                 break
             except Exception as exc:
                 is_503 = "503" in str(exc) or "Service Unavailable" in str(exc)
-                if is_503:
+                is_empty = "Bos sonuc" in str(exc) or "yanit vermedi" in str(exc)
+                is_api_busy = is_503 or is_empty
+                if is_api_busy:
                     with _state_lock:
                         state.consecutive_503 += 1
                         if state.consecutive_503 >= CONSECUTIVE_503_EXIT:
                             state.stop_requested = True
                     if state.stop_requested:
-                        log("API kuyrugu kapali (3x503), is cikiliyor. Watcher yeniden baslatacak.")
+                        log("API meşgul/kapali (3x bos sonuc/503), is cikiliyor. Watcher yeniden baslatacak.")
                         page_ok = False
                         break
                     wait = 180
-                    log(f"  {para.filename} API 503 (kisitlama) -> {wait}s sonra tekrar")
+                    log(f"  {para.filename} API mesgul (503/bos sonuc) -> {wait}s sonra tekrar")
                     time.sleep(wait)
                     attempt += 1
                     continue

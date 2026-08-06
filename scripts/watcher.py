@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import time
+import json
 import urllib.error
 import urllib.request
 from pathlib import Path
@@ -42,7 +43,28 @@ def api_queue_open() -> bool:
                                  headers={"Content-Type": "application/json"})
     try:
         with urllib.request.urlopen(req, timeout=60) as resp:
-            return resp.status == 200
+            if resp.status != 200:
+                return False
+            # API kuyruk tabanli; generate POST basarili olsa bile kuyruk
+            # bos sonuc verebilir. Uretimin gercekten donup donmedigini
+            # hizli bir SSE denemesiyle dogrula.
+            event_id = json.loads(resp.read().decode("utf-8")).get("event_id")
+            if not event_id:
+                return False
+            stream = urllib.request.urlopen(
+                f"{GRADIO_URL}/{event_id}", timeout=60
+            )
+            for raw_line in stream:
+                if not raw_line:
+                    continue
+                line = raw_line.decode("utf-8", errors="ignore")
+                if line.startswith("event:"):
+                    event = line.split(":", 1)[1].strip()
+                    if event == "complete":
+                        return True
+                    if event == "error":
+                        return False
+            return False
     except urllib.error.HTTPError as exc:
         return exc.code != 503
     except Exception:
