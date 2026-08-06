@@ -447,4 +447,25 @@ h1 {
   .paragraph {
     font-size: 1rem;
   }
+
+  .immersive .reader {
+    padding: 20px 8px 40px;
+  }
+
+  .immersive .page-sheet {
+    padding: 32px 20px 48px;
+  }
+
+  .immersive .page-sheet::before {
+    width: 18px;
+  }
+
+  .immersive .paragraph {
+    font-size: 1rem;
+    line-height: 1.75;
+  }
+
+  .immersive .page-footer {
+    margin-top: 1.6em;
+  }
 }
