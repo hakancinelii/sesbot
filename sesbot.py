@@ -603,6 +603,15 @@ class VoxCPMClient:
             )
             stream.raise_for_status()
 
+            # SSE okumasinin sonsuza kadar bloke olmamasini garanti et:
+            # urllib3/requests bazi durumlarda read timeout uygulamaz,
+            # bu yuzden ham sokete zaman asimi koy.
+            try:
+                sock = stream.raw._fp.fp.raw._sock
+                sock.settimeout(min(120, timeout_seconds))
+            except Exception:
+                pass
+
             event_name = ""
             data_lines: list[str] = []
             for raw_line in stream.iter_lines(decode_unicode=True):

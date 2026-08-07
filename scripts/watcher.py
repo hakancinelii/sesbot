@@ -46,8 +46,8 @@ def api_queue_open() -> bool:
             if resp.status != 200:
                 return False
             # API kuyruk tabanli; generate POST basarili olsa bile kuyruk
-            # bos sonuc verebilir. Uretimin gercekten donup donmedigini
-            # hizli bir SSE denemesiyle dogrula.
+            # bos sonuc ("complete" ama data yok) verebilir. Uretimin
+            # gercekten ses donup donmedigini SSE'de data satiri arayarak dogrula.
             event_id = json.loads(resp.read().decode("utf-8")).get("event_id")
             if not event_id:
                 return False
@@ -58,10 +58,10 @@ def api_queue_open() -> bool:
                 if not raw_line:
                     continue
                 line = raw_line.decode("utf-8", errors="ignore")
+                if line.startswith("data:") and ('"url"' in line or '"path"' in line):
+                    return True
                 if line.startswith("event:"):
                     event = line.split(":", 1)[1].strip()
-                    if event == "complete":
-                        return True
                     if event == "error":
                         return False
             return False
