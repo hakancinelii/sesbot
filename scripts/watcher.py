@@ -84,7 +84,7 @@ def batch_running() -> bool:
 def launch_batch() -> None:
     env = os.environ.copy()
     env.update(ENV)
-    workers = os.environ.get("NARRATE_WORKERS", "2")
+    workers = os.environ.get("NARRATE_WORKERS", "1")
     start_page = os.environ.get("NARRATE_START_PAGE", "1")
     cmd = [str(ROOT / ".venv" / "bin" / "python"), str(ROOT / "scripts" / "narrate_all.py"),
            "--workers", workers, "--start-page", start_page]

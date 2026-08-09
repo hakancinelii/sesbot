@@ -7,6 +7,7 @@ import argparse
 import json
 import re
 import shutil
+import socket
 import subprocess
 import sys
 import tempfile
@@ -604,25 +605,43 @@ class VoxCPMClient:
             stream.raise_for_status()
 
             # SSE okumasinin sonsuza kadar bloke olmamasini garanti et:
-            # urllib3/requests bazi durumlarda read timeout uygulamaz,
-            # bu yuzden ham sokete zaman asimi koy.
-            try:
-                sock = stream.raw._fp.fp.raw._sock
-                sock.settimeout(min(120, timeout_seconds))
-            except Exception:
-                pass
-
+            # requests iter_lines bazen heartbeat'te takilir; bunun yerine
+            # ham soketten satir satir oku ve her satirda deadline kontrol et.
             event_name = ""
             data_lines: list[str] = []
-            for raw_line in stream.iter_lines(decode_unicode=True):
-                if not raw_line:
-                    continue
-                if raw_line.startswith("event:"):
-                    event_name = raw_line.split(":", 1)[1].strip()
-                elif raw_line.startswith("data:"):
-                    data_lines.append(raw_line.split(":", 1)[1].strip())
-                if time.time() >= deadline:
-                    raise TimeoutError("VoxCPM yanit vermedi.")
+            try:
+                sock = stream.raw._fp.fp.raw._sock
+            except Exception:
+                sock = None
+            buf = b""
+            while True:
+                if sock is not None:
+                    try:
+                        remaining = max(5, deadline - time.time())
+                        sock.settimeout(min(60, remaining))
+                        chunk = sock.recv(4096)
+                    except socket.timeout:
+                        raise TimeoutError("VoxCPM yanit vermedi.")
+                    if not chunk:
+                        break
+                    buf += chunk
+                else:
+                    chunk = stream.raw.read(4096)
+                    if not chunk:
+                        break
+                    buf += chunk
+                while b"\n" in buf:
+                    raw_line, buf = buf.split(b"\n", 1)
+                    raw_line = raw_line.strip()
+                    if not raw_line:
+                        continue
+                    line = raw_line.decode("utf-8", errors="ignore")
+                    if line.startswith("event:"):
+                        event_name = line.split(":", 1)[1].strip()
+                    elif line.startswith("data:"):
+                        data_lines.append(line.split(":", 1)[1].strip())
+                    if time.time() >= deadline:
+                        raise TimeoutError("VoxCPM yanit vermedi.")
 
             if event_name == "complete":
                 if not data_lines:

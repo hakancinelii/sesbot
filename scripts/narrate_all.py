@@ -103,33 +103,6 @@ def make_client() -> VoxCPMClient:
     client = VoxCPMClient(cfg_value=2.0)
     client.upload_reference(REFERENCE)
     return client
-
-
-def generate_with_watchdog(client, text: str, timeout_seconds: int = 120) -> dict:
-    """client.generate'i sinirli surede calistirir; asarsa hata firlatir.
-
-    API (HF demo space) bazen SSE akisinda takilir. ThreadPoolExecutor
-    kullanarak beklemeyi garanti altina aliriz.
-    """
-    result_holder: list = []
-    error_holder: list = []
-
-    def worker() -> None:
-        try:
-            result_holder.append(client.generate(text, timeout_seconds=timeout_seconds))
-        except Exception as exc:
-            error_holder.append(exc)
-
-    thread = threading.Thread(target=worker, daemon=True)
-    thread.start()
-    thread.join(timeout=timeout_seconds + 30)
-    if error_holder:
-        raise error_holder[0]
-    if result_holder:
-        return result_holder[0]
-    raise TimeoutError("VoxCPM yanit vermedi.")
-
-
 def narrate_page(
     book_page: int,
     missing_paras: list,
@@ -149,7 +122,7 @@ def narrate_page(
         attempt = 1
         while attempt <= MAX_RETRIES and not state.stop_requested:
             try:
-                result = generate_with_watchdog(client, para.text, timeout_seconds=120)
+                result = client.generate(para.text, timeout_seconds=120)
                 audio_url = result.get("url")
                 if not audio_url:
                     audio_url = f"{client.space_url}/gradio_api/file={result['path']}"
@@ -204,7 +177,7 @@ def narrate_page(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--workers", type=int, default=2, help="Ayni anda seslendirilecek sayfa sayisi")
+    parser.add_argument("--workers", type=int, default=1, help="Ayni anda seslendirilecek sayfa sayisi (varsayilan 1; API tek kullanici kuyrugu oldugu icin paralel asiliyor)")
     parser.add_argument("--start-page", type=int, default=1, help="Bu sayfadan itibaren isle (onundekileri atla)")
     args = parser.parse_args()
     workers = max(1, args.workers)
