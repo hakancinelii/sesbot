@@ -52,9 +52,12 @@ def api_queue_open() -> bool:
             if not event_id:
                 return False
             stream = urllib.request.urlopen(
-                f"{GRADIO_URL}/{event_id}", timeout=60
+                f"{GRADIO_URL}/{event_id}", timeout=30
             )
+            deadline = time.time() + 30
             for raw_line in stream:
+                if time.time() > deadline:
+                    return False
                 if not raw_line:
                     continue
                 line = raw_line.decode("utf-8", errors="ignore")
@@ -82,10 +85,13 @@ def launch_batch() -> None:
     env = os.environ.copy()
     env.update(ENV)
     workers = os.environ.get("NARRATE_WORKERS", "2")
-    log(f"API acik, batch baslatiliyor... (workers={workers})")
+    start_page = os.environ.get("NARRATE_START_PAGE", "1")
+    cmd = [str(ROOT / ".venv" / "bin" / "python"), str(ROOT / "scripts" / "narrate_all.py"),
+           "--workers", workers, "--start-page", start_page]
+    log(f"API acik, batch baslatiliyor... (workers={workers}, start-page={start_page})")
     with open(ROOT / "narrate_all.log", "a", encoding="utf-8") as handle:
         subprocess.Popen(
-            [str(ROOT / ".venv" / "bin" / "python"), str(ROOT / "scripts" / "narrate_all.py"), "--workers", workers],
+            cmd,
             cwd=str(ROOT),
             env=env,
             stdout=handle,

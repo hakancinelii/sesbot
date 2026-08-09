@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import sys
 import threading
@@ -204,13 +205,14 @@ def narrate_page(
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workers", type=int, default=2, help="Ayni anda seslendirilecek sayfa sayisi")
+    parser.add_argument("--start-page", type=int, default=1, help="Bu sayfadan itibaren isle (onundekileri atla)")
     args = parser.parse_args()
     workers = max(1, args.workers)
 
     if not is_configured():
         raise SystemExit("SUPABASE_URL / SERVICE_KEY / BUCKET ortam degiskenleri gerekli.")
 
-    paragraphs = extract_paragraphs(PDF)
+    paragraphs = extract_paragraphs(PDF, start_page=args.start_page)
     pages: dict[int, list] = {}
     for para in paragraphs:
         pages.setdefault(para.book_page, []).append(para)
@@ -239,21 +241,33 @@ def main() -> None:
 
     total_pages = len(pages)
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = [
-            executor.submit(narrate_page, book_page, missing, state, total_pages)
-            for book_page, missing in tasks
-        ]
-        for future in as_completed(futures):
-            try:
-                future.result()
-            except Exception as exc:
-                log(f"Paralel isci hatasi: {exc}")
-            if state.stop_requested:
-                for f in futures:
-                    f.cancel()
+    executor = ThreadPoolExecutor(max_workers=workers)
+    futures = [
+        executor.submit(narrate_page, book_page, missing, state, total_pages)
+        for book_page, missing in tasks
+    ]
 
+    def watchdog() -> None:
+        # API 3x mesgul gorulurse sureci hemen bitir; isciler takilsa bile
+        # watcher yeniden baslatsin diye beklemeden cik.
+        while True:
+            if state.stop_requested:
+                log("Watchdog: API mesgul, surecten cikiliyor.")
+                os._exit(0)
+            time.sleep(5)
+
+    watchdog_thread = threading.Thread(target=watchdog, daemon=True)
+    watchdog_thread.start()
+
+    for future in as_completed(futures):
+        try:
+            future.result()
+        except Exception as exc:
+            log(f"Paralel isci hatasi: {exc}")
+
+    executor.shutdown(wait=False, cancel_futures=True)
     log(f"TAMAMLANDI. Hazir paragraf: {len(state.done)}")
+    os._exit(0)
 
 
 if __name__ == "__main__":
