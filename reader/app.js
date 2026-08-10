@@ -217,6 +217,9 @@ function buildSheet(items) {
 
   items.forEach((item, index) => {
     if (item.type === "image") {
+      if (state.manifest.cover && state.page === getPageList()[0]) {
+        return;
+      }
       const figure = document.createElement("figure");
       figure.className = "cover-figure page-image-figure";
       const img = document.createElement("img");
