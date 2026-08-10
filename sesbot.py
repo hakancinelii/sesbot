@@ -339,6 +339,32 @@ def front_matter_pages() -> list[Paragraph]:
     return result
 
 
+FRONT_MATTER_PDF_COUNT = 8
+
+
+def front_matter_image_pages() -> dict[str, list[dict]]:
+    """On sayfalar (kapak, kunye vb.) icin gorsel sayfa temsilini dondurur.
+
+    PDF 0-7 sayfalari sirasiyla arayuz sayfasi 1..8'e eslenir ve her biri
+    /front-N.png gorseli olarak gosterilir.
+    """
+    pages: dict[str, list[dict]] = {}
+    for pdf_index in range(FRONT_MATTER_PDF_COUNT):
+        page_key = str(pdf_index + 1)
+        pages[page_key] = [
+            {
+                "index": 0,
+                "type": "image",
+                "text": "",
+                "image": f"/front-{pdf_index}.png",
+                "audio": None,
+                "available": False,
+                "heading": False,
+            }
+        ]
+    return pages
+
+
 def extract_paragraphs_from_ocr(
     ocr_path: Path,
     start_page: int = 1,
@@ -384,8 +410,6 @@ def extract_paragraphs_from_ocr(
         body_by_page.setdefault(paragraph.book_page, []).append(paragraph)
 
     final: list[Paragraph] = []
-    if start_page <= 1:
-        final.extend(front_matter_pages())
     all_pages = sorted(set(pages) | set(body_by_page))
     for book_page in all_pages:
         if book_page < start_page or book_page > last_page:

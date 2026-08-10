@@ -92,6 +92,11 @@ def main() -> None:
             source = READER / name
             if source.exists():
                 shutil.copy2(source, PUBLIC / name)
+        for i in range(8):
+            name = f"front-{i}.png"
+            source = READER / name
+            if source.exists():
+                shutil.copy2(source, PUBLIC / name)
 
     print(f"Vercel build hazir: {copied} yerel ses dosyasi, sayfalar {manifest['availablePages']}")
 

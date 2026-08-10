@@ -71,11 +71,13 @@ def _get_pages():
     global _pages_cache
     if _pages_cache is not None:
         return _pages_cache
-    from sesbot import extract_paragraphs
+    from sesbot import extract_paragraphs, front_matter_image_pages
 
-    pages = {}
+    pages = front_matter_image_pages()
     for paragraph in extract_paragraphs(PDF):
         key = str(paragraph.book_page)
+        if key in pages:
+            continue
         pages.setdefault(key, []).append(
             {
                 "index": paragraph.index_on_page,
@@ -95,7 +97,7 @@ def _build_manifest():
 
     for page_key, items in pages.items():
         for item in items:
-            if item.get("type") == "cover":
+            if item.get("type") in ("cover", "image"):
                 continue
             name = f"{page_key}_{item['index']}.mp3"
             if name in url_map:

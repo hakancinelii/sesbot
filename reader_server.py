@@ -31,11 +31,15 @@ def load_runtime_manifest() -> dict | None:
 
 
 def build_manifest(pdf_path: Path, output_dir: Path) -> dict:
+    from sesbot import front_matter_image_pages
+
+    pages: dict[str, list[dict]] = front_matter_image_pages()
     paragraphs = extract_paragraphs(pdf_path)
-    pages: dict[str, list[dict]] = {}
 
     for paragraph in paragraphs:
         page_key = str(paragraph.book_page)
+        if page_key in pages:
+            continue
         audio_name = paragraph.filename
         audio_path = output_dir / audio_name
         page_merged = output_dir / f"{paragraph.book_page}.mp3"

@@ -208,6 +208,18 @@ h1 {
   box-shadow: 0 24px 60px rgba(31, 26, 23, 0.35);
 }
 
+.page-image-figure {
+  margin: 0;
+}
+
+.page-image {
+  max-width: 100%;
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  box-shadow: 0 16px 40px rgba(31, 26, 23, 0.25);
+}
+
 .paragraph {
   margin: 0 0 1.35em;
   line-height: 1.75;

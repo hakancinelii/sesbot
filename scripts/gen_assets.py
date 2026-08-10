@@ -38,6 +38,24 @@ def square_icon(cover: Image.Image, size: int) -> Image.Image:
     return canvas
 
 
+def render_front_pages(dpi: int = 150) -> None:
+    """Kitabin ilk 8 sayfasini (kapak, kunye vb.) gorsel olarak render eder.
+
+    Cikti: reader/front-0.png .. front-7.png ve public/front-0.png ..
+    (manifest'te sayfa 1..8 bu gorselleri gosterir)
+    """
+    doc = fitz.open(PDF)
+    for pdf_index in range(8):
+        page = doc[pdf_index]
+        pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72))
+        img = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        for dest in DEST_DIRS:
+            dest.mkdir(parents=True, exist_ok=True)
+            img.save(dest / f"front-{pdf_index}.png")
+    doc.close()
+    print("On sayfa gorselleri uretildi (front-0..7.png).")
+
+
 def main() -> None:
     cover = render_cover()
 
@@ -53,6 +71,8 @@ def main() -> None:
         apple = square_icon(cover, 180)
         apple.save(dest / "apple-touch-icon.png")
         print(f"Uretildi: {dest}")
+
+    render_front_pages()
 
     webmanifest = {
         "name": "Sırların Sırrı - Sesli Kitap",

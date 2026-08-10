@@ -190,7 +190,7 @@ function nextPlayableIndex(page, fromIndex, delta) {
   const items = getPageItems(page);
   let i = fromIndex + delta;
   while (i >= 0 && i < items.length) {
-    if (items[i] && !items[i].heading) return i;
+    if (items[i] && !items[i].heading && items[i].type !== "image") return i;
     i += delta;
   }
   return null;
@@ -216,6 +216,18 @@ function buildSheet(items) {
   }
 
   items.forEach((item, index) => {
+    if (item.type === "image") {
+      const figure = document.createElement("figure");
+      figure.className = "cover-figure page-image-figure";
+      const img = document.createElement("img");
+      img.className = "cover-image page-image";
+      img.src = item.image;
+      img.alt = `Sayfa ${state.page}`;
+      figure.appendChild(img);
+      sheet.appendChild(figure);
+      return;
+    }
+
     if (item.heading) {
       const heading = document.createElement("h2");
       heading.className = "paragraph chapter-heading";
