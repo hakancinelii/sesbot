@@ -33,12 +33,16 @@ def load_runtime_manifest() -> dict | None:
 def build_manifest(pdf_path: Path, output_dir: Path) -> dict:
     from sesbot import front_matter_image_pages
 
-    pages: dict[str, list[dict]] = front_matter_image_pages()
+    front_pages = front_matter_image_pages()
+    pages: dict[str, list[dict]] = {}
     paragraphs = extract_paragraphs(pdf_path)
+
+    for page_key, items in front_pages.items():
+        pages[page_key] = list(items)
 
     for paragraph in paragraphs:
         page_key = str(paragraph.book_page)
-        if page_key in pages:
+        if page_key in front_pages:
             continue
         audio_name = paragraph.filename
         audio_path = output_dir / audio_name

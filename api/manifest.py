@@ -73,10 +73,11 @@ def _get_pages():
         return _pages_cache
     from sesbot import extract_paragraphs, front_matter_image_pages
 
-    pages = front_matter_image_pages()
+    front_pages = front_matter_image_pages()
+    pages: dict[str, list[dict]] = {k: list(v) for k, v in front_pages.items()}
     for paragraph in extract_paragraphs(PDF):
         key = str(paragraph.book_page)
-        if key in pages:
+        if key in front_pages:
             continue
         pages.setdefault(key, []).append(
             {
