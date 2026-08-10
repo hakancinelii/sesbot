@@ -179,6 +179,9 @@ h1 {
 .cover-figure {
   margin: 0 0 1.8em;
   text-align: center;
+  display: flex;
+  justify-content: center;
+  align-items: center;
 }
 
 .page-footer {
@@ -197,11 +200,12 @@ h1 {
 }
 
 .cover-image {
-  max-width: min(360px, 100%);
-  width: 100%;
+  max-width: min(420px, 92vw);
+  width: auto;
   height: auto;
-  border-radius: 10px;
-  box-shadow: 0 14px 36px rgba(31, 26, 23, 0.22);
+  max-height: 78vh;
+  border-radius: 12px;
+  box-shadow: 0 24px 60px rgba(31, 26, 23, 0.35);
 }
 
 .paragraph {
