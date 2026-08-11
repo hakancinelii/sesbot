@@ -4,7 +4,7 @@ import urllib.request
 import urllib.parse
 from urllib.error import HTTPError, URLError
 
-VOXCPM_SPACE = "https://openbmb-voxcpm-demo.hf.space"
+VOXCPM_SPACE = "https://voxcpm.modelbest.cn"
 
 import os
 import time
@@ -82,6 +82,8 @@ class handler(BaseHTTPRequestHandler):
                     2.0, # cfg
                     False, # normalize
                     False, # denoise
+                    10, # dit_steps
+                    f"sesbot-{int(time.time() * 1000) % 100000}", # user_id
                 ]
             }
 

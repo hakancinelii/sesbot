@@ -19,7 +19,7 @@ from typing import Optional
 
 import fitz
 
-VOXCPM_SPACE = "https://openbmb-voxcpm-demo.hf.space"
+VOXCPM_SPACE = "https://voxcpm.modelbest.cn"
 SOFT_HYPHEN = "\u00ad"
 SENTENCE_END = re.compile(r'[.!?\u2026]["\']?\s*$')
 STARTS_PARAGRAPH = re.compile(r'^[A-Z\u00c7\u011e\u0130\u00d6\u015e\u00dc"\u00ab(]')
@@ -280,7 +280,10 @@ def clean_ocr_text(text: str) -> str:
         if category.startswith("C"):
             continue
         out.append(char)
-    return "".join(out)
+    cleaned = "".join(out)
+    # OCR artefakti: 'mü' Kiril 'тё' olarak okunmus
+    cleaned = cleaned.replace("Blöf тё", "Blöf mü")
+    return cleaned
 
 
 def find_ocr_text() -> Optional[Path]:
@@ -477,11 +480,15 @@ class VoxCPMClient:
         ultimate_cloning: bool = False,
         control_instruction: str = "",
         prompt_text: str = "",
+        dit_steps: float = 30,
+        user_id: str = "",
     ) -> None:
         self.space_url = space_url.rstrip("/")
         self.cfg_value = cfg_value
         self.denoise = denoise
         self.normalize = normalize
+        self.dit_steps = dit_steps
+        self.user_id = user_id
         self.ultimate_cloning = ultimate_cloning
         self.control_instruction = control_instruction
         self.prompt_text = prompt_text
@@ -608,6 +615,8 @@ class VoxCPMClient:
                 self.cfg_value,
                 self.normalize,
                 self.denoise,
+                self.dit_steps,
+                self.user_id or f"sesbot-{int(time.time() * 1000) % 100000}",
             ]
         }
 
@@ -628,44 +637,26 @@ class VoxCPMClient:
             )
             stream.raise_for_status()
 
-            # SSE okumasinin sonsuza kadar bloke olmamasini garanti et:
-            # requests iter_lines bazen heartbeat'te takilir; bunun yerine
-            # ham soketten satir satir oku ve her satirda deadline kontrol et.
-            event_name = ""
-            data_lines: list[str] = []
+            # Asilmayi onle: alttaki sokete read timeout koy. iter_lines
+            # soket timeout'u tetikleyince ReadTimeout firlatir.
             try:
                 sock = stream.raw._fp.fp.raw._sock
+                sock.settimeout(min(90, max(30, deadline - time.time())))
             except Exception:
-                sock = None
-            buf = b""
-            while True:
-                if sock is not None:
-                    try:
-                        remaining = max(5, deadline - time.time())
-                        sock.settimeout(min(60, remaining))
-                        chunk = sock.recv(4096)
-                    except socket.timeout:
-                        raise TimeoutError("VoxCPM yanit vermedi.")
-                    if not chunk:
-                        break
-                    buf += chunk
-                else:
-                    chunk = stream.raw.read(4096)
-                    if not chunk:
-                        break
-                    buf += chunk
-                while b"\n" in buf:
-                    raw_line, buf = buf.split(b"\n", 1)
-                    raw_line = raw_line.strip()
-                    if not raw_line:
-                        continue
-                    line = raw_line.decode("utf-8", errors="ignore")
-                    if line.startswith("event:"):
-                        event_name = line.split(":", 1)[1].strip()
-                    elif line.startswith("data:"):
-                        data_lines.append(line.split(":", 1)[1].strip())
-                    if time.time() >= deadline:
-                        raise TimeoutError("VoxCPM yanit vermedi.")
+                pass
+
+            event_name = ""
+            data_lines: list[str] = []
+            for raw_line in stream.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                line = raw_line.strip()
+                if line.startswith("event:"):
+                    event_name = line.split(":", 1)[1].strip()
+                elif line.startswith("data:"):
+                    data_lines.append(line.split(":", 1)[1].strip())
+                if time.time() >= deadline:
+                    raise TimeoutError("VoxCPM yanit vermedi.")
 
             if event_name == "complete":
                 if not data_lines:

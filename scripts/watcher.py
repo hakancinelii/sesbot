@@ -20,7 +20,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 LOG = ROOT / "watcher.log"
 POLL_SECONDS = 300  # 5 dakika
-GRADIO_URL = "https://openbmb-voxcpm-demo.hf.space/gradio_api/call/generate"
+GRADIO_URL = "https://voxcpm.modelbest.cn/gradio_api/call/generate"
 ENV = {
     "SUPABASE_URL": os.environ.get("SUPABASE_URL", ""),
     "SUPABASE_SERVICE_KEY": os.environ.get("SUPABASE_SERVICE_KEY", ""),
@@ -37,7 +37,7 @@ def log(msg: str) -> None:
 
 def api_queue_open() -> bool:
     body = (
-        '{"data":["test","",null,false,"",2.0,false,false]}'
+        '{"data":["test","",null,false,"",2.0,false,false,10,"watchdog"]}'
     ).encode("utf-8")
     req = urllib.request.Request(GRADIO_URL, data=body, method="POST",
                                  headers={"Content-Type": "application/json"})
