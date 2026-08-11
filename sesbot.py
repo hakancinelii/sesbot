@@ -20,6 +20,12 @@ from typing import Optional
 import fitz
 
 VOXCPM_SPACE = "https://voxcpm.modelbest.cn"
+# Yedekli calisma: sunucu listesi sirasiyla denenir.
+# modelbest = VoxCPM2 (10 parametre), openbmb = eski demo (8 parametre)
+VOXCPM_SPACES = [
+    "https://voxcpm.modelbest.cn",
+    "https://openbmb-voxcpm-demo.hf.space",
+]
 SOFT_HYPHEN = "\u00ad"
 SENTENCE_END = re.compile(r'[.!?\u2026]["\']?\s*$')
 STARTS_PARAGRAPH = re.compile(r'^[A-Z\u00c7\u011e\u0130\u00d6\u015e\u00dc"\u00ab(]')
@@ -605,20 +611,36 @@ class VoxCPMClient:
         if self._reference_file is None:
             raise RuntimeError("Referans ses yuklenmedi.")
 
-        payload = {
-            "data": [
-                text,
-                self.control_instruction,
-                self._reference_file,
-                self.ultimate_cloning,
-                self.prompt_text if self.ultimate_cloning else "",
-                self.cfg_value,
-                self.normalize,
-                self.denoise,
-                self.dit_steps,
-                self.user_id or f"sesbot-{int(time.time() * 1000) % 100000}",
-            ]
-        }
+        # modelbest VoxCPM2 10 parametre, eski HF demo 8 parametre ister.
+        use_voxcpm2 = "modelbest" in self.space_url
+        if use_voxcpm2:
+            payload = {
+                "data": [
+                    text,
+                    self.control_instruction,
+                    self._reference_file,
+                    self.ultimate_cloning,
+                    self.prompt_text if self.ultimate_cloning else "",
+                    self.cfg_value,
+                    self.normalize,
+                    self.denoise,
+                    self.dit_steps,
+                    self.user_id or f"sesbot-{int(time.time() * 1000) % 100000}",
+                ]
+            }
+        else:
+            payload = {
+                "data": [
+                    text,
+                    self.control_instruction,
+                    self._reference_file,
+                    self.ultimate_cloning,
+                    self.prompt_text if self.ultimate_cloning else "",
+                    self.cfg_value,
+                    self.normalize,
+                    self.denoise,
+                ]
+            }
 
         response = self.session.post(
             f"{self.space_url}/gradio_api/call/generate",

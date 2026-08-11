@@ -5,6 +5,10 @@ import urllib.parse
 from urllib.error import HTTPError, URLError
 
 VOXCPM_SPACE = "https://voxcpm.modelbest.cn"
+VOXCPM_SPACES = [
+    "https://voxcpm.modelbest.cn",
+    "https://openbmb-voxcpm-demo.hf.space",
+]
 
 import os
 import time
@@ -52,88 +56,106 @@ class handler(BaseHTTPRequestHandler):
                 return
 
             ref_path = os.path.join(os.path.dirname(__file__), "..", "amazon_reference_50s.mp3")
-            session = requests.Session()
-            
-            with open(ref_path, "rb") as handle:
-                upload_resp = session.post(
-                    f"{VOXCPM_SPACE}/gradio_api/upload",
-                    files={"files": ("amazon_reference_50s.mp3", handle, "audio/mpeg")},
-                    timeout=30
-                )
-            upload_resp.raise_for_status()
-            uploaded_path = upload_resp.json()[0]
-            
-            reference_file = {
-                "path": uploaded_path,
-                "url": f"{VOXCPM_SPACE}/gradio_api/file={uploaded_path}",
-                "orig_name": "amazon_reference_50s.mp3",
-                "size": os.path.getsize(ref_path),
-                "mime_type": "audio/mpeg",
-                "meta": {"_type": "gradio.FileData"},
-            }
 
-            payload = {
-                "data": [
-                    text,
-                    "", # control instruction
-                    reference_file,
-                    False, # ultimate cloning
-                    "", # prompt text
-                    2.0, # cfg
-                    False, # normalize
-                    False, # denoise
-                    10, # dit_steps
-                    f"sesbot-{int(time.time() * 1000) % 100000}", # user_id
-                ]
-            }
+            last_error = None
+            audio_bytes = None
+            for space_url in VOXCPM_SPACES:
+                try:
+                    session = requests.Session()
+                    with open(ref_path, "rb") as handle:
+                        upload_resp = session.post(
+                            f"{space_url}/gradio_api/upload",
+                            files={"files": ("amazon_reference_50s.mp3", handle, "audio/mpeg")},
+                            timeout=30
+                        )
+                    upload_resp.raise_for_status()
+                    uploaded_path = upload_resp.json()[0]
 
-            gen_resp = session.post(
-                f"{VOXCPM_SPACE}/gradio_api/call/generate",
-                json=payload,
-                timeout=30
-            )
-            gen_resp.raise_for_status()
-            event_id = gen_resp.json()["event_id"]
+                    reference_file = {
+                        "path": uploaded_path,
+                        "url": f"{space_url}/gradio_api/file={uploaded_path}",
+                        "orig_name": "amazon_reference_50s.mp3",
+                        "size": os.path.getsize(ref_path),
+                        "mime_type": "audio/mpeg",
+                        "meta": {"_type": "gradio.FileData"},
+                    }
 
-            audio_url = None
-            deadline = time.time() + 60
-            while time.time() < deadline:
-                stream = session.get(
-                    f"{VOXCPM_SPACE}/gradio_api/call/generate/{event_id}",
-                    stream=True,
-                    timeout=30
-                )
-                stream.raise_for_status()
-                
-                event_name = ""
-                data_lines = []
-                for raw_line in stream.iter_lines(decode_unicode=True):
-                    if not raw_line:
-                        continue
-                    if raw_line.startswith("event:"):
-                        event_name = raw_line.split(":", 1)[1].strip()
-                    elif raw_line.startswith("data:"):
-                        data_lines.append(raw_line.split(":", 1)[1].strip())
+                    use_voxcpm2 = "modelbest" in space_url
+                    payload_data = [
+                        text,
+                        "",  # control instruction
+                        reference_file,
+                        False,  # ultimate cloning
+                        "",  # prompt text
+                        2.0,  # cfg
+                        False,  # normalize
+                        False,  # denoise
+                    ]
+                    if use_voxcpm2:
+                        payload_data.extend([
+                            10,  # dit_steps
+                            f"sesbot-{int(time.time() * 1000) % 100000}",  # user_id
+                        ])
+                    payload = {"data": payload_data}
 
-                if event_name == "complete":
-                    result = json.loads(data_lines[0])
-                    file_info = result[0]
-                    audio_url = file_info.get("url")
+                    gen_resp = session.post(
+                        f"{space_url}/gradio_api/call/generate",
+                        json=payload,
+                        timeout=30
+                    )
+                    gen_resp.raise_for_status()
+                    event_id = gen_resp.json()["event_id"]
+
+                    audio_url = None
+                    deadline = time.time() + 60
+                    while time.time() < deadline:
+                        stream = session.get(
+                            f"{space_url}/gradio_api/call/generate/{event_id}",
+                            stream=True,
+                            timeout=60
+                        )
+                        stream.raise_for_status()
+
+                        event_name = ""
+                        data_lines = []
+                        for raw_line in stream.iter_lines(decode_unicode=True):
+                            if not raw_line:
+                                continue
+                            if raw_line.startswith("event:"):
+                                event_name = raw_line.split(":", 1)[1].strip()
+                            elif raw_line.startswith("data:"):
+                                data_lines.append(raw_line.split(":", 1)[1].strip())
+                            if time.time() >= deadline:
+                                break
+
+                        if event_name == "complete":
+                            if data_lines:
+                                result = json.loads(data_lines[0])
+                                if result:
+                                    file_info = result[0]
+                                    audio_url = file_info.get("url")
+                                    if not audio_url:
+                                        audio_url = f"{space_url}/gradio_api/file={file_info['path']}"
+                            break
+                        elif event_name == "error":
+                            detail = data_lines[0] if data_lines else "Bilinmeyen API hatasi"
+                            raise Exception(f"Generation error: {detail}")
+
+                        time.sleep(2)
+
                     if not audio_url:
-                        audio_url = f"{VOXCPM_SPACE}/gradio_api/file={file_info['path']}"
+                        raise Exception("Timeout waiting for audio generation")
+
+                    audio_resp = session.get(audio_url, timeout=60)
+                    audio_resp.raise_for_status()
+                    audio_bytes = audio_resp.content
                     break
-                elif event_name == "error":
-                    raise Exception(f"Generation error: {data_lines[0] if data_lines else 'Unknown'}")
-                
-                time.sleep(2)
+                except Exception as exc:
+                    last_error = exc
+                    print(f"Sunucu hatasi {space_url}: {exc}")
 
-            if not audio_url:
-                raise Exception("Timeout waiting for audio generation")
-
-            audio_resp = session.get(audio_url, timeout=30)
-            audio_resp.raise_for_status()
-
-            audio_bytes = audio_resp.content
+            if not audio_bytes:
+                raise Exception(f"Tum sunucular basarisiz: {last_error}")
             supabase_url = None
             page = data.get("page")
             paragraph_index = data.get("paragraphIndex")

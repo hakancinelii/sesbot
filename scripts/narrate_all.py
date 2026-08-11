@@ -27,7 +27,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "api"))
 
-from sesbot import extract_paragraphs, VoxCPMClient  # noqa: E402
+from sesbot import extract_paragraphs, VoxCPMClient, VOXCPM_SPACES  # noqa: E402
 from lib.supabase_storage import (  # noqa: E402
     is_configured,
     upload_bytes,
@@ -99,10 +99,45 @@ class NarrationState:
         )
 
 
-def make_client() -> VoxCPMClient:
-    client = VoxCPMClient(cfg_value=2.0)
+def make_client(space_url: str | None = None) -> VoxCPMClient:
+    client = VoxCPMClient(cfg_value=2.0, space_url=space_url or VOXCPM_SPACES[0])
     client.upload_reference(REFERENCE)
     return client
+
+
+def make_clients() -> list[VoxCPMClient]:
+    """Yedekli calisma icin tum sunuculara client kurar."""
+    return [make_client(url) for url in VOXCPM_SPACES]
+
+
+def generate_safely(clients, text: str, timeout_seconds: int = 120) -> dict:
+    """generate'i sinirli surede calistirir; asarsa TimeoutError firlatir.
+
+    ModelBest sunucusu bazen SSE akisinda takilir ve iter_lines asla
+    donmez. Ayri bir thread'de calistirip join(timeout) ile garanti altina
+    aliriz. Ilk sunucu basarisiz olursa digerine gecer (failover).
+    """
+    errors = []
+    for client in clients:
+        result_holder: list = []
+        error_holder: list = []
+
+        def worker() -> None:
+            try:
+                result_holder.append(client.generate(text, timeout_seconds=timeout_seconds))
+            except Exception as exc:
+                error_holder.append(exc)
+
+        thread = threading.Thread(target=worker, daemon=True)
+        thread.start()
+        thread.join(timeout=timeout_seconds + 30)
+        if result_holder:
+            return result_holder[0]
+        if error_holder:
+            errors.append(f"{client.space_url}: {error_holder[0]}")
+    raise RuntimeError("Tum sunucular basarisiz: " + " | ".join(errors))
+
+
 def narrate_page(
     book_page: int,
     missing_paras: list,
@@ -111,7 +146,7 @@ def narrate_page(
 ) -> None:
     import requests
 
-    client = make_client()
+    clients = make_clients()
     page_ok = True
     for para in missing_paras:
         if state.stop_requested:
@@ -122,7 +157,7 @@ def narrate_page(
         attempt = 1
         while attempt <= MAX_RETRIES and not state.stop_requested:
             try:
-                result = client.generate(para.text, timeout_seconds=120)
+                result = generate_safely(clients, para.text, timeout_seconds=120)
                 audio_url = result.get("url")
                 if not audio_url:
                     audio_url = f"{client.space_url}/gradio_api/file={result['path']}"

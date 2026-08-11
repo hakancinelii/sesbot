@@ -21,6 +21,10 @@ ROOT = Path(__file__).resolve().parent.parent
 LOG = ROOT / "watcher.log"
 POLL_SECONDS = 300  # 5 dakika
 GRADIO_URL = "https://voxcpm.modelbest.cn/gradio_api/call/generate"
+GRADIO_URLS = [
+    "https://voxcpm.modelbest.cn/gradio_api/call/generate",
+    "https://openbmb-voxcpm-demo.hf.space/gradio_api/call/generate",
+]
 ENV = {
     "SUPABASE_URL": os.environ.get("SUPABASE_URL", ""),
     "SUPABASE_SERVICE_KEY": os.environ.get("SUPABASE_SERVICE_KEY", ""),
@@ -36,41 +40,48 @@ def log(msg: str) -> None:
 
 
 def api_queue_open() -> bool:
-    body = (
-        '{"data":["test","",null,false,"",2.0,false,false,10,"watchdog"]}'
-    ).encode("utf-8")
-    req = urllib.request.Request(GRADIO_URL, data=body, method="POST",
+    for gradio_url in GRADIO_URLS:
+        try:
+            if _test_single(gradio_url):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _test_single(gradio_url: str) -> bool:
+    is_voxcpm2 = "modelbest" in gradio_url
+    payload_data = ["test", "", None, False, "", 2.0, False, False]
+    if is_voxcpm2:
+        payload_data.extend([10, "watchdog"])
+    body = json.dumps({"data": payload_data}).encode("utf-8")
+    req = urllib.request.Request(gradio_url, data=body, method="POST",
                                  headers={"Content-Type": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=60) as resp:
-            if resp.status != 200:
-                return False
-            # API kuyruk tabanli; generate POST basarili olsa bile kuyruk
-            # bos sonuc ("complete" ama data yok) verebilir. Uretimin
-            # gercekten ses donup donmedigini SSE'de data satiri arayarak dogrula.
-            event_id = json.loads(resp.read().decode("utf-8")).get("event_id")
-            if not event_id:
-                return False
-            stream = urllib.request.urlopen(
-                f"{GRADIO_URL}/{event_id}", timeout=30
-            )
-            deadline = time.time() + 30
-            for raw_line in stream:
-                if time.time() > deadline:
-                    return False
-                if not raw_line:
-                    continue
-                line = raw_line.decode("utf-8", errors="ignore")
-                if line.startswith("data:") and ('"url"' in line or '"path"' in line):
-                    return True
-                if line.startswith("event:"):
-                    event = line.split(":", 1)[1].strip()
-                    if event == "error":
-                        return False
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        if resp.status != 200:
             return False
-    except urllib.error.HTTPError as exc:
-        return exc.code != 503
-    except Exception:
+        # API kuyruk tabanli; generate POST basarili olsa bile kuyruk
+        # bos sonuc ("complete" ama data yok) verebilir. Uretimin
+        # gercekten ses donup donmedigini SSE'de data satiri arayarak dogrula.
+        event_id = json.loads(resp.read().decode("utf-8")).get("event_id")
+        if not event_id:
+            return False
+        stream = urllib.request.urlopen(
+            f"{gradio_url}/{event_id}", timeout=30
+        )
+        deadline = time.time() + 30
+        for raw_line in stream:
+            if time.time() > deadline:
+                return False
+            if not raw_line:
+                continue
+            line = raw_line.decode("utf-8", errors="ignore")
+            if line.startswith("data:") and ('"url"' in line or '"path"' in line):
+                return True
+            if line.startswith("event:"):
+                event = line.split(":", 1)[1].strip()
+                if event == "error":
+                    return False
         return False
 
 
