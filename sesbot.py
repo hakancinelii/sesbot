@@ -1075,5 +1075,200 @@ def main() -> int:
     return 0
 
 
+CHATTERBOX_SPACE = "https://resembleai-chatterbox-multilingual-tts-v3.hf.space"
+
+
+class ChatterboxClient:
+    """ResembleAI Chatterbox Multilingual TTS - Turkce + ses klonlama."""
+
+    def __init__(self, space_url: str = CHATTERBOX_SPACE) -> None:
+        self.space_url = space_url.rstrip("/")
+        self._reference_file: Optional[dict] = None
+        try:
+            import requests
+            self.session = requests.Session()
+        except Exception:
+            self.session = None
+
+    def upload_reference(self, reference_path: Path) -> dict:
+        with reference_path.open("rb") as handle:
+            response = self.session.post(
+                f"{self.space_url}/gradio_api/upload",
+                files={"files": (reference_path.name, handle, "audio/mpeg")},
+                timeout=120,
+            )
+        response.raise_for_status()
+        uploaded_path = response.json()[0]
+        self._reference_file = {
+            "path": uploaded_path,
+            "url": f"{self.space_url}/gradio_api/file={uploaded_path}",
+            "orig_name": reference_path.name,
+            "size": reference_path.stat().st_size,
+            "mime_type": "audio/mpeg",
+            "meta": {"_type": "gradio.FileData"},
+        }
+        return self._reference_file
+
+    def generate(self, text: str, timeout_seconds: int = 300) -> dict:
+        if self._reference_file is None:
+            raise RuntimeError("Referans ses yuklenmedi.")
+        payload = {
+            "data": [
+                text,
+                self._reference_file,
+                "tr",   # language
+                0.5,    # exaggeration
+                0.8,    # temperature
+                0,      # seed
+                0.5,    # cfg/pace
+            ]
+        }
+        response = self.session.post(
+            f"{self.space_url}/gradio_api/call/generate_tts_audio",
+            json=payload,
+            timeout=60,
+        )
+        response.raise_for_status()
+        event_id = response.json()["event_id"]
+
+        deadline = time.time() + timeout_seconds
+        while time.time() < deadline:
+            stream = self.session.get(
+                f"{self.space_url}/gradio_api/call/generate_tts_audio/{event_id}",
+                stream=True,
+                timeout=min(120, timeout_seconds),
+            )
+            stream.raise_for_status()
+            try:
+                sock = stream.raw._fp.fp.raw._sock
+                sock.settimeout(min(90, max(30, deadline - time.time())))
+            except Exception:
+                pass
+            data_lines: list[str] = []
+            for raw_line in stream.iter_lines(decode_unicode=True):
+                if not raw_line:
+                    continue
+                line = raw_line.strip()
+                if line.startswith("data:"):
+                    data_lines.append(line.split(":", 1)[1].strip())
+                if time.time() >= deadline:
+                    raise TimeoutError("Chatterbox yanit vermedi.")
+            if data_lines:
+                result = json.loads(data_lines[0])
+                if result:
+                    return result[0]
+            time.sleep(1)
+        raise TimeoutError("Chatterbox yanit vermedi.")
+
+
+NVIDIA_FUNCTION_ID = "ddacc747-1269-4fab-bfd9-8f593dead106"
+NVIDIA_API_KEY = "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"
+NVIDIA_SERVER = "grpc.nvcf.nvidia.com:443"
+NVIDIA_VOICE = "Chatterbox-Multilingual.tr-TR.Male"
+NVIDIA_LANG = "tr-TR"
+
+
+class NvidiaChatterboxClient:
+    """NVIDIA NIM uzerinden Chatterbox Multilingual TTS.
+
+    Hazir Turkce erkek sesi kullanir (klonlama yok). gRPC tabanli.
+    """
+
+    def __init__(
+        self,
+        voice_name: str = NVIDIA_VOICE,
+        language_code: str = NVIDIA_LANG,
+    ) -> None:
+        self.voice_name = voice_name
+        self.language_code = language_code
+        self.space_url = "https://build.nvidia.com"
+        self._riva = None
+        self._tts_service = None
+
+    def _service(self):
+        if self._tts_service is None:
+            if self._riva is None:
+                try:
+                    import riva.client
+                    import riva.client.tts
+                except ImportError as exc:
+                    raise RuntimeError(
+                        "riva-client gerekli: .venv/bin/pip install nvidia-riva-client"
+                    ) from exc
+                self._riva = riva.client
+            auth = self._riva.Auth(
+                uri=NVIDIA_SERVER,
+                use_ssl=True,
+                metadata_args=[
+                    ["function-id", NVIDIA_FUNCTION_ID],
+                    ["authorization", f"Bearer {NVIDIA_API_KEY}"],
+                ],
+            )
+            self._tts_service = self._riva.tts.SpeechSynthesisService(auth)
+        return self._tts_service
+
+    def upload_reference(self, reference_path: Path) -> dict:
+        # NVIDIA hazir ses kullanir, referans gereksiz
+        return {"path": str(reference_path)}
+
+    def generate(self, text: str, timeout_seconds: int = 300) -> dict:
+        service = self._service()
+        # NVIDIA ~20 sn token siniri var; paragrafi cumlelere bolup
+        # parca parca uret, sonra birlestir.
+        parts = self._split_text(text)
+        if len(parts) == 1:
+            resp = service.synthesize(
+                text,
+                voice_name=self.voice_name,
+                language_code=self.language_code,
+            )
+            return {"audio": resp.audio, "url": None, "path": None}
+
+        chunks = []
+        for part in parts:
+            resp = service.synthesize(
+                part,
+                voice_name=self.voice_name,
+                language_code=self.language_code,
+            )
+            chunks.append(resp.audio)
+        combined = b"".join(chunks)
+        return {"audio": combined, "url": None, "path": None}
+
+    def _split_text(self, text: str, max_len: int = 180) -> list[str]:
+        """Metni ~180 karakterlik cumle sinirlarinda boler.
+
+        NVIDIA API ~20 sn (500 speech token) siniri koyar; guvenli
+        bolmek icin ~180 karakter (~12 sn) hedeflenir.
+        """
+        import re
+
+        sentences = re.split(r"(?<=[.!?…])\s+", text.strip())
+        parts: list[str] = []
+        current = ""
+        for s in sentences:
+            if not s.strip():
+                continue
+            while len(s) > max_len:
+                # Tek bir cumle bile siniri asarsa daha da bol
+                cut = s.rfind(" ", 0, max_len)
+                if cut < max_len * 0.5:
+                    cut = max_len
+                part = s[:cut].strip()
+                s = s[cut:].strip()
+                if current:
+                    parts.append(current)
+                    current = ""
+                parts.append(part)
+            if current and len(current) + len(s) > max_len:
+                parts.append(current)
+                current = s
+            else:
+                current = (current + " " + s).strip() if current else s
+        if current:
+            parts.append(current)
+        return parts or [text]
+
+
 if __name__ == "__main__":
     raise SystemExit(main())

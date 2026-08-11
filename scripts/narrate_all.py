@@ -14,6 +14,7 @@ Kullanim:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import json
 import os
 import re
@@ -27,7 +28,15 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "api"))
 
-from sesbot import extract_paragraphs, VoxCPMClient, VOXCPM_SPACES  # noqa: E402
+from sesbot import (
+    extract_paragraphs,
+    VoxCPMClient,
+    VOXCPM_SPACES,
+    ChatterboxClient,
+    CHATTERBOX_SPACE,
+    NvidiaChatterboxClient,
+    NVIDIA_VOICE,
+)  # noqa: E402
 from lib.supabase_storage import (  # noqa: E402
     is_configured,
     upload_bytes,
@@ -105,48 +114,55 @@ def make_client(space_url: str | None = None) -> VoxCPMClient:
     return client
 
 
-def make_clients() -> list[VoxCPMClient]:
-    """Yedekli calisma icin tum sunuculara client kurar."""
-    return [make_client(url) for url in VOXCPM_SPACES]
+def make_clients() -> list:
+    """Yedekli calisma icin tum sunuculara client kurar.
+
+    Sirasiyla denenir: Chatterbox (Turkce + hizli), sonra VoxCPM sunuculari.
+    Referans yukleme basarisiz olan sunucu atlanir (failover icin).
+    """
+    clients = []
+    for url in [CHATTERBOX_SPACE] + VOXCPM_SPACES:
+        try:
+            client = ChatterboxClient(space_url=url) if "chatterbox" in url or "resembleai" in url else VoxCPMClient(cfg_value=2.0, space_url=url)
+            client.upload_reference(REFERENCE)
+            clients.append(client)
+            log(f"  Sunucu hazir: {url}")
+        except Exception as exc:
+            log(f"  Sunucu atlandi {url}: {exc}")
+    if not clients:
+        raise RuntimeError("Hicbir sunucuya baglanilamadi.")
+    return clients
 
 
-def generate_safely(clients, text: str, timeout_seconds: int = 120) -> dict:
+def generate_safely(clients, text: str, timeout_seconds: int = 120) -> tuple[dict, object]:
     """generate'i sinirli surede calistirir; asarsa TimeoutError firlatir.
 
     ModelBest sunucusu bazen SSE akisinda takilir ve iter_lines asla
-    donmez. Ayri bir thread'de calistirip join(timeout) ile garanti altina
-    aliriz. Ilk sunucu basarisiz olursa digerine gecer (failover).
+    donmez. ThreadPoolExecutor + result(timeout=) ile garanti altina aliriz.
+    Ilk sunucu basarisiz olursa digerine gecer (failover).
     """
     errors = []
     for client in clients:
-        result_holder: list = []
-        error_holder: list = []
-
-        def worker() -> None:
-            try:
-                result_holder.append(client.generate(text, timeout_seconds=timeout_seconds))
-            except Exception as exc:
-                error_holder.append(exc)
-
-        thread = threading.Thread(target=worker, daemon=True)
-        thread.start()
-        thread.join(timeout=timeout_seconds + 30)
-        if result_holder:
-            return result_holder[0]
-        if error_holder:
-            errors.append(f"{client.space_url}: {error_holder[0]}")
+        try:
+            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+                fut = ex.submit(client.generate, text, timeout_seconds)
+                return fut.result(timeout=timeout_seconds + 30), client
+        except concurrent.futures.TimeoutError:
+            errors.append(f"{client.space_url}: zaman asimi")
+        except Exception as exc:
+            errors.append(f"{client.space_url}: {exc}")
     raise RuntimeError("Tum sunucular basarisiz: " + " | ".join(errors))
 
 
 def narrate_page(
     book_page: int,
     missing_paras: list,
+    clients: list,
     state: NarrationState,
     total_pages: int,
 ) -> None:
     import requests
 
-    clients = make_clients()
     page_ok = True
     for para in missing_paras:
         if state.stop_requested:
@@ -157,11 +173,14 @@ def narrate_page(
         attempt = 1
         while attempt <= MAX_RETRIES and not state.stop_requested:
             try:
-                result = generate_safely(clients, para.text, timeout_seconds=120)
-                audio_url = result.get("url")
-                if not audio_url:
-                    audio_url = f"{client.space_url}/gradio_api/file={result['path']}"
-                audio = requests.get(audio_url, timeout=120).content
+                result, client = generate_safely(clients, para.text, timeout_seconds=120)
+                if result.get("audio"):
+                    audio = result["audio"]
+                else:
+                    audio_url = result.get("url")
+                    if not audio_url:
+                        audio_url = f"{client.space_url}/gradio_api/file={result['path']}"
+                    audio = requests.get(audio_url, timeout=120).content
                 upload_bytes(f"audio/pages/{para.filename}", audio)
                 with _state_lock:
                     state.done.add(para.filename)
@@ -214,13 +233,15 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--workers", type=int, default=1, help="Ayni anda seslendirilecek sayfa sayisi (varsayilan 1; API tek kullanici kuyrugu oldugu icin paralel asiliyor)")
     parser.add_argument("--start-page", type=int, default=1, help="Bu sayfadan itibaren isle (onundekileri atla)")
+    parser.add_argument("--end-page", type=int, default=0, help="Bu sayfaya kadar isle (0 = son sayfaya kadar)")
+    parser.add_argument("--server", type=str, default="", help="Sadece bu sunucuyu kullan (chatbox/modelbest/hf). Bos = hepsi failover")
     args = parser.parse_args()
     workers = max(1, args.workers)
 
     if not is_configured():
         raise SystemExit("SUPABASE_URL / SERVICE_KEY / BUCKET ortam degiskenleri gerekli.")
 
-    paragraphs = extract_paragraphs(PDF, start_page=args.start_page)
+    paragraphs = extract_paragraphs(PDF, start_page=args.start_page, end_page=args.end_page or None)
     pages: dict[int, list] = {}
     for para in paragraphs:
         pages.setdefault(para.book_page, []).append(para)
@@ -249,9 +270,45 @@ def main() -> None:
 
     total_pages = len(pages)
 
+    server_filter = args.server.lower()
+    if server_filter == "nvidia":
+        # NVIDIA hazir ses (erkek Turkce) - klonlama yok
+        clients = []
+        try:
+            client = NvidiaChatterboxClient()
+            clients.append(client)
+            log(f"  Sunucu hazir: NVIDIA ({NVIDIA_VOICE})")
+        except Exception as exc:
+            log(f"  NVIDIA atlandi: {exc}")
+        if not clients:
+            raise RuntimeError("NVIDIA sunucusuna baglanilamadi.")
+    elif server_filter:
+        # Sadece istenen sunucuyu kullan
+        if server_filter == "chatbox":
+            urls = [CHATTERBOX_SPACE]
+        elif server_filter == "modelbest":
+            urls = [u for u in VOXCPM_SPACES if "modelbest" in u]
+        elif server_filter == "hf":
+            urls = [u for u in VOXCPM_SPACES if "hf.space" in u]
+        else:
+            urls = [u for u in [CHATTERBOX_SPACE] + VOXCPM_SPACES if server_filter in u]
+        clients = []
+        for url in urls:
+            try:
+                client = ChatterboxClient(space_url=url) if "chatterbox" in url or "resembleai" in url else VoxCPMClient(cfg_value=2.0, space_url=url)
+                client.upload_reference(REFERENCE)
+                clients.append(client)
+                log(f"  Sunucu hazir: {url}")
+            except Exception as exc:
+                log(f"  Sunucu atlandi {url}: {exc}")
+        if not clients:
+            raise RuntimeError("Istenen sunucuya baglanilamadi.")
+    else:
+        clients = make_clients()
+
     executor = ThreadPoolExecutor(max_workers=workers)
     futures = [
-        executor.submit(narrate_page, book_page, missing, state, total_pages)
+        executor.submit(narrate_page, book_page, missing, clients, state, total_pages)
         for book_page, missing in tasks
     ]
 
