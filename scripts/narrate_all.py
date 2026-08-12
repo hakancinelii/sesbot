@@ -98,6 +98,7 @@ class NarrationState:
         self.consecutive_503 = 0
         self.stop_requested = False
         self.total_paras = total_paras
+        self.last_success = time.time()
 
     def remaining(self) -> int:
         return sum(
@@ -154,6 +155,31 @@ def generate_safely(clients, text: str, timeout_seconds: int = 120) -> tuple[dic
     raise RuntimeError("Tum sunucular basarisiz: " + " | ".join(errors))
 
 
+def convert_pcm_to_mp3(pcm_bytes: bytes, sample_rate: int = 22050) -> bytes:
+    """Ham Linear PCM baytlarini MP3'e cevirir (ffmpeg ile)."""
+    import subprocess
+    import tempfile
+
+    with tempfile.TemporaryDirectory() as tmp:
+        tmp_path = Path(tmp)
+        pcm_path = tmp_path / "in.raw"
+        mp3_path = tmp_path / "out.mp3"
+        pcm_path.write_bytes(pcm_bytes)
+        ff = None
+        try:
+            from imageio_ffmpeg import get_ffmpeg_exe
+            ff = get_ffmpeg_exe()
+        except Exception:
+            ff = "ffmpeg"
+        cmd = [
+            ff, "-y", "-f", "s16le", "-ar", str(sample_rate), "-ac", "1",
+            "-i", str(pcm_path), "-c:a", "libmp3lame", "-b:a", "192k",
+            str(mp3_path),
+        ]
+        subprocess.run(cmd, check=True, capture_output=True)
+        return mp3_path.read_bytes()
+
+
 def narrate_page(
     book_page: int,
     missing_paras: list,
@@ -176,6 +202,8 @@ def narrate_page(
                 result, client = generate_safely(clients, para.text, timeout_seconds=120)
                 if result.get("audio"):
                     audio = result["audio"]
+                    if isinstance(client, NvidiaChatterboxClient):
+                        audio = convert_pcm_to_mp3(audio)
                 else:
                     audio_url = result.get("url")
                     if not audio_url:
@@ -185,6 +213,7 @@ def narrate_page(
                 with _state_lock:
                     state.done.add(para.filename)
                     state.consecutive_503 = 0
+                    state.last_success = time.time()
                     remaining = state.remaining()
                 log(f"  {para.filename} OK ({len(audio)} byte, kalan {remaining})")
                 ok_uploaded = True
@@ -313,13 +342,16 @@ def main() -> None:
     ]
 
     def watchdog() -> None:
-        # API 3x mesgul gorulurse sureci hemen bitir; isciler takilsa bile
-        # watcher yeniden baslatsin diye beklemeden cik.
+        # API 3x mesgul gorulurse ya da 8 dk boyunca hic uretim olmazsa
+        # sureci bitir; watcher yeniden baslatsin.
         while True:
             if state.stop_requested:
                 log("Watchdog: API mesgul, surecten cikiliyor.")
                 os._exit(0)
-            time.sleep(5)
+            if time.time() - state.last_success > 480:
+                log("Watchdog: 8 dk uretim yok (takilma), surecten cikiliyor. Watcher yeniden baslatacak.")
+                os._exit(0)
+            time.sleep(10)
 
     watchdog_thread = threading.Thread(target=watchdog, daemon=True)
     watchdog_thread.start()

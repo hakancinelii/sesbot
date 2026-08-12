@@ -1216,24 +1216,25 @@ class NvidiaChatterboxClient:
         # NVIDIA ~20 sn token siniri var; paragrafi cumlelere bolup
         # parca parca uret, sonra birlestir.
         parts = self._split_text(text)
-        if len(parts) == 1:
-            resp = service.synthesize(
+        chunks = []
+        for part in parts:
+            resp = self._synth_with_timeout(service, part, timeout_seconds)
+            chunks.append(resp.audio)
+        combined = b"".join(chunks)
+        return {"audio": combined, "url": None, "path": None}
+
+    def _synth_with_timeout(self, service, text: str, timeout_seconds: int):
+        """synthesize'i sinirli surede calistirir; gRPC asilmasini onler."""
+        import concurrent.futures
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as ex:
+            fut = ex.submit(
+                service.synthesize,
                 text,
                 voice_name=self.voice_name,
                 language_code=self.language_code,
             )
-            return {"audio": resp.audio, "url": None, "path": None}
-
-        chunks = []
-        for part in parts:
-            resp = service.synthesize(
-                part,
-                voice_name=self.voice_name,
-                language_code=self.language_code,
-            )
-            chunks.append(resp.audio)
-        combined = b"".join(chunks)
-        return {"audio": combined, "url": None, "path": None}
+            return fut.result(timeout=timeout_seconds)
 
     def _split_text(self, text: str, max_len: int = 180) -> list[str]:
         """Metni ~180 karakterlik cumle sinirlarinda boler.
