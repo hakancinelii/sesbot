@@ -40,6 +40,10 @@ def log(msg: str) -> None:
 
 
 def api_queue_open() -> bool:
+    if os.environ.get("NARRATE_SERVER", "").lower() == "nvidia":
+        # NVIDIA gRPC tabanli; HTTP ile test edilemez. Batch kendi
+        # synthesize timeout'lariyla takilmayi yonetir.
+        return True
     for gradio_url in GRADIO_URLS:
         try:
             if _test_single(gradio_url):
@@ -99,7 +103,10 @@ def launch_batch() -> None:
     start_page = os.environ.get("NARRATE_START_PAGE", "1")
     cmd = [str(ROOT / ".venv" / "bin" / "python"), str(ROOT / "scripts" / "narrate_all.py"),
            "--workers", workers, "--start-page", start_page]
-    log(f"API acik, batch baslatiliyor... (workers={workers}, start-page={start_page})")
+    server = os.environ.get("NARRATE_SERVER", "")
+    if server:
+        cmd += ["--server", server]
+    log(f"API acik, batch baslatiliyor... (workers={workers}, start-page={start_page}, server={server or 'auto'})")
     with open(ROOT / "narrate_all.log", "a", encoding="utf-8") as handle:
         subprocess.Popen(
             cmd,

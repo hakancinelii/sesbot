@@ -51,6 +51,21 @@ function saveLastPage() {
   localStorage.setItem("sesbot-last-page", String(state.page));
 }
 
+const NARRATE_KEY = "sesbot-narrating";
+
+function saveNarrateState(page) {
+  localStorage.setItem(NARRATE_KEY, String(page));
+}
+
+function clearNarrateState() {
+  localStorage.removeItem(NARRATE_KEY);
+}
+
+function loadNarrateState() {
+  const saved = Number(localStorage.getItem(NARRATE_KEY));
+  return Number.isFinite(saved) && saved > 0 ? saved : null;
+}
+
 async function init() {
   let response = await fetch("/api/manifest", { cache: "no-store" });
   if (!response.ok) {
@@ -72,6 +87,12 @@ async function init() {
 
   bindEvents();
   renderPage();
+
+  const resumePage = loadNarrateState();
+  if (resumePage !== null && state.manifest.pages[String(resumePage)]) {
+    updateStatus(`Sayfa ${resumePage} seslendirmesi kaldığı yerden devam ediyor...`);
+    startBookNarration(resumePage, false);
+  }
 }
 
 function bindEvents() {
@@ -602,6 +623,7 @@ function loadAndPlay(src, label) {
 function stopPlayback() {
   cancelVolumeRamp();
   state.generationCancelled = true;
+  clearNarrateState();
   if (state.transitionTimer) {
     clearTimeout(state.transitionTimer);
     state.transitionTimer = null;
@@ -830,6 +852,7 @@ async function startBookNarration(page = state.page, forceCurrent = false) {
   state.generationCancelled = false;
   let current = page;
   let force = forceCurrent;
+  saveNarrateState(current);
   while (state.autoNarration && !state.generationCancelled) {
     updateStatus(`Sayfa ${current} seslendiriliyor...`);
     await generatePageAudio(current, force);
@@ -838,8 +861,10 @@ async function startBookNarration(page = state.page, forceCurrent = false) {
     if (next === null) break;
     current = next;
     force = false;
+    saveNarrateState(current);
   }
   state.autoNarration = false;
+  clearNarrateState();
   if (!state.generationCancelled) {
     updateStatus("Kitap seslendirmesi tamamlandı");
   }
